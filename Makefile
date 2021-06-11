@@ -1,6 +1,8 @@
 CC=g++
 CFLAGS=-std=c++14
-INC=-I .
+INC=-I. -I/usr/local/include
+LIBS=-L /usr/local/lib
+TEST_LINK=-lgtest -lgtest_main
 
 transfer: ./out/main.cpp.o ./out/io_handler.cpp.o ./out/parser.cpp.o ./out/table_handler.cpp.o
 	$(CC) ./out/main.cpp.o ./out/io_handler.cpp.o ./out/parser.cpp.o ./out/table_handler.cpp.o -o transfer 
@@ -17,6 +19,17 @@ transfer: ./out/main.cpp.o ./out/io_handler.cpp.o ./out/parser.cpp.o ./out/table
 ./out/io_handler.cpp.o: ./src/io_handler.cpp ./include/io_handler.h ./include/rapidjson/document.h ./include/rapidjson/writer.h ./include/rapidjson/stringbuffer.h
 	$(CC) $(INC) -c ./src/io_handler.cpp -o ./out/io_handler.cpp.o
 
-.PHONY: clean
 clean:
-	if [ -e transfer ];then rm transfer;rm -rf ./out/*;fi
+	if [ -e transfer ];then rm transfer;fi
+	if [ -z "$(ls -A ./out)" ];then rm -rf ./out/*;fi
+
+.PHONY: clean
+
+./out/test_parser.cpp.o: ./test/test_parser.cpp /usr/local/include/gtest/gtest.h
+	$(CC) $(INC) -c ./test/test_parser.cpp -o ./out/test_parser.cpp.o
+
+test_parser: ./out/test_parser.cpp.o ./out/parser.cpp.o
+	$(CC) $(INC) $(LIBS) ./out/test_parser.cpp.o ./out/parser.cpp.o -o test_parser $(TEST_LINK)
+	mv test_parser ./out/
+
+.PHONY: test_parser
