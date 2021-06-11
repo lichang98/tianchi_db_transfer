@@ -2,7 +2,9 @@
 
 #include <string>
 #include <vector>
+#include <list>
 #include <unordered_map>
+#include <queue>
 
 namespace db_transfer
 {
@@ -53,11 +55,34 @@ namespace db_transfer
 		std::string db_name_;
 		std::string table_name_;
 		// Map from column name to Column entity
-		std::unordered_map<std::string, Column> columns_;
+		std::vector<Column> columns_;
 		// Array of indexs
 		std::vector<Index> indexs_;
 
+		std::unordered_map<std::string, int> name2col_;
+		std::unordered_map<std::string, int> name2index_;
+
 		Table() {}
 		Table(std::string db_name, std::string table_name) {}
+	};
+
+	class TableRow
+	{
+	public:
+		std::vector<std::string> fields_;
+
+		TableRow() {}
+		TableRow(std::vector<std::string> &fields): fields_(std::move(fields)) {}
+	};
+
+
+	class TableData
+	{
+	public:
+		std::list<TableRow> datas_;
+		// `B` operations waiting for `A`s
+		std::queue<std::string> update_before_queue_;
+		// Map from primary key to row record
+		std::unordered_map<std::string, std::list<TableRow>::iterator> pk2row;
 	};
 } // namespace db_transfer

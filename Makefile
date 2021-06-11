@@ -25,6 +25,8 @@ clean:
 
 .PHONY: clean
 
+# Tests
+
 ./out/test_parser.cpp.o: ./test/test_parser.cpp /usr/local/include/gtest/gtest.h
 	$(CC) $(INC) -c ./test/test_parser.cpp -o ./out/test_parser.cpp.o
 
