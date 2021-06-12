@@ -28,3 +28,26 @@ std::string db_transfer::IOHandler::LoadSchema(const std::string schema_fpath, b
 	delete[] line;
 	return schme_data;
 }
+
+std::string db_transfer::IOHandler::LoadSrcDataNextLine(const std::string src_fpath, bool &data_avail, std::string &table_name) {
+	char *line = new char[1024];
+	if (!this->src_data_fs_.is_open()) {
+		this->src_data_fs_.open(src_fpath, std::fstream::in);
+	} else if (this->src_data_fs_.eof()) {
+		data_avail = false;
+		this->src_data_fs_.close();
+		delete[] line;
+		return "";
+	}
+
+	this->src_data_fs_.getline(line, 1024);
+	std::string line_str(line);
+	int idx_tab1 = 0;
+	idx_tab1 = line_str.find('\t', idx_tab1) + 1;
+	idx_tab1 = line_str.find('\t', idx_tab1) + 1;
+	int idx_tab2 = idx_tab1;
+	idx_tab2 = line_str.find('\t', idx_tab2);
+	table_name = line_str.substr(idx_tab1, idx_tab2 - idx_tab1);
+	delete[] line;
+	return line_str;
+}

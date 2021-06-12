@@ -18,6 +18,8 @@ namespace db_transfer {
 
 			// Each time load and return schema info of one table
 			std::string LoadSchema(const std::string schema_fpath, bool &data_avail);
+			// Each time load one line from src data file
+			std::string LoadSrcDataNextLine(const std::string src_fpath, bool &data_avail, std::string &table_name);
 
 			std::stringstream ss_;
 			std::fstream schema_fs_;

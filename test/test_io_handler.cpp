@@ -38,3 +38,14 @@ TEST(IO_HANDLER, LOAD_SCHEMA) {
 	one_table_schema = io_handler.LoadSchema(schme_file, is_avail);
 	ASSERT_FALSE(is_avail);
 }
+
+TEST(IO_HANDLER, LOAD_SRC) {
+	const char *src_file = "./demo-test/source_file_dir/source_file_dir/tianchi_dts_source_data_1";
+	db_transfer::IOHandler io_handler;
+	std::string table_name;
+	bool is_avail = true;
+	std::string line_str = io_handler.LoadSrcDataNextLine(src_file, is_avail, table_name);
+	ASSERT_TRUE(is_avail);
+	ASSERT_EQ(table_name, "orders");
+	ASSERT_EQ(line_str, "I	tianchi_dts_data	orders	5	1	1	1517	2021-04-11 15:41:55.0	9	6	1");
+}
