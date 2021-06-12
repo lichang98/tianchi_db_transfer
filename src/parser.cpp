@@ -73,11 +73,20 @@ db_transfer::Table db_transfer::ParseTable(std::string multi_line_str) {
 	for (int i = 0; i < val; ++i) {
 		ss >> str;
 		Index index = ParseIndexMeta(str);
-		db_table.indexs_.emplace_back(std::move(index));
+		db_table.indexs_.emplace_back(index);
 		db_table.name2index_.insert(std::make_pair(index.index_name_, i));
 	}
 	// Since primary key records included in index records, jump them
 	return db_table;
+}
+
+std::string db_transfer::OperationParser::GetTableNameFromOp(std::string op_record) {
+	int idx = 0;
+	idx = op_record.find('\t', idx) + 1;
+	idx = op_record.find('\t', idx) + 1;
+	int next_idx = idx;
+	next_idx = op_record.find('\t', next_idx);
+	return op_record.substr(idx, next_idx - idx);
 }
 
 void db_transfer::OperationParser::ProcessOp(std::string op_record) {

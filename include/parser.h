@@ -19,20 +19,18 @@ namespace db_transfer
 		void RecordUpdate(std::string op_record);
 		void RecordDelete(std::string op_record);
 
+		std::string GetTableNameFromOp(std::string op_record);
+
 		std::vector<std::string> RowRecordsAsVec(std::string op_record);
 
 
-		OperationParser() {
-			for (auto index : table_meta_.indexs_) {
-				if (index.primary_) {
-					for (auto col_name : index.index_cols_) {
-						primary_key_idxs.emplace_back(table_meta_.name2col_[col_name]);
-					}
-				}
-			}
-		}
+		OperationParser() {}
 
 		OperationParser(Table &table_meta) {
+			InitWithMeta(table_meta);
+		}
+
+		void InitWithMeta(Table &table_meta) {
 			this->table_meta_ = table_meta;
 			for (auto index : table_meta_.indexs_) {
 				if (index.primary_) {
