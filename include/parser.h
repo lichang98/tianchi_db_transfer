@@ -26,7 +26,7 @@ namespace db_transfer
 			for (auto index : table_meta_.indexs_) {
 				if (index.primary_) {
 					for (auto col_name : index.index_cols_) {
-						primary_key_idxs.emplace_back(table_meta_.name2index_[col_name]);
+						primary_key_idxs.emplace_back(table_meta_.name2col_[col_name]);
 					}
 				}
 			}
@@ -37,11 +37,11 @@ namespace db_transfer
 			for (auto index : table_meta_.indexs_) {
 				if (index.primary_) {
 					for (auto col_name : index.index_cols_) {
-						primary_key_idxs.emplace_back(table_meta_.name2index_[col_name]);
+						primary_key_idxs.emplace_back(table_meta_.name2col_[col_name]);
 					}
 				} else if (index.unique_) {
 					for (auto col_name : index.index_cols_) {
-						unique_key_idxs.emplace_back(table_meta_.name2index_[col_name]);
+						unique_key_idxs.emplace_back(table_meta_.name2col_[col_name]);
 					}
 				}
 			}
