@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <queue>
 #include <ostream>
+#include <algorithm>
+#include <set>
 
 namespace db_transfer
 {
@@ -83,6 +85,10 @@ namespace db_transfer
 			out << row.fields_[i];
 			return out;
 		}
+
+		std::string& operator [](int idx) {
+			return this->fields_[idx];
+		}
 	};
 
 
@@ -94,5 +100,7 @@ namespace db_transfer
 		std::queue<std::string> update_before_queue_;
 		// Map from primary key to row record
 		std::unordered_map<std::string, std::list<TableRow>::iterator> pk2row;
+
+		void SortRowsByPK(Table table_meta);
 	};
 } // namespace db_transfer

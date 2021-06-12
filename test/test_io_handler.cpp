@@ -1,4 +1,3 @@
-#include "include/io_handler.h"
 #include "include/parser.h"
 
 #include <gtest/gtest.h>

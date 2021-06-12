@@ -1,4 +1,5 @@
 #include "include/parser.h"
+
 #include <gtest/gtest.h>
 
 TEST(PARSER, TEST_COL_PARSE) {
