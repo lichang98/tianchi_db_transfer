@@ -5,6 +5,7 @@
 #include <list>
 #include <unordered_map>
 #include <queue>
+#include <ostream>
 
 namespace db_transfer
 {
@@ -73,6 +74,15 @@ namespace db_transfer
 
 		TableRow() {}
 		TableRow(std::vector<std::string> &fields): fields_(std::move(fields)) {}
+
+		friend std::ostream& operator <<(std::ostream &out, const TableRow& row) {
+			int i = 0;
+			do {
+				out << row.fields_[i] << "\t";
+			} while ((++i) < row.fields_.size() - 1);
+			out << row.fields_[i];
+			return out;
+		}
 	};
 
 

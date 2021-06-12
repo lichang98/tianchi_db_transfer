@@ -51,3 +51,12 @@ std::string db_transfer::IOHandler::LoadSrcDataNextLine(const std::string src_fp
 	delete[] line;
 	return line_str;
 }
+
+void db_transfer::IOHandler::SaveTableData(TableData table_data, std::string save_file_path) {
+	std::fstream fs;
+	fs.open(save_file_path, std::fstream::out);
+	for (auto &row : table_data.datas_) {
+		fs << row << "\n";
+	}
+	fs.close();
+}
