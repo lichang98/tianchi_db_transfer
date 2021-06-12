@@ -1,6 +1,6 @@
 #pragma once
 // == Parser for parse records read from schema.info and data load from src data
-#include "include/table_handler.h"
+#include "include/io_handler.h"
 
 #include "include/rapidjson/document.h"
 #include "include/rapidjson/writer.h"
@@ -8,6 +8,7 @@
 
 #include <iostream>
 #include <sstream>
+#include <algorithm>
 
 namespace db_transfer
 {
@@ -46,12 +47,22 @@ namespace db_transfer
 					for (auto col_name : index.index_cols_) {
 						primary_key_idxs.emplace_back(table_meta_.name2index_[col_name]);
 					}
+				} else if (index.unique_) {
+					for (auto col_name : index.index_cols_) {
+						unique_key_idxs.emplace_back(table_meta_.name2index_[col_name]);
+					}
 				}
 			}
+			// Sort primary key idxs
+			std::sort(primary_key_idxs.begin(), primary_key_idxs.end());
+			// Sort unique key idxs
+			std::sort(unique_key_idxs.begin(), unique_key_idxs.end());
 		}
 
 		// The array index of primary key
 		std::vector<int> primary_key_idxs;
+		// Unique keys (not include primary key)
+		std::vector<int> unique_key_idxs;
 		Table table_meta_;
 		TableData table_data_;
 	};

@@ -124,6 +124,13 @@ void db_transfer::OperationParser::RecordInsert(std::string op_record) {
 	for (auto idx : this->primary_key_idxs) {
 		pk_str += row_record[idx];
 	}
+	// Check primary key
+	if (this->table_data_.pk2row.find(pk_str) != this->table_data_.pk2row.end()) {
+		// Update with newest record
+		*(this->table_data_.pk2row[pk_str]) = row_record;
+		return;
+	}
+	
 	this->table_data_.datas_.emplace_front(std::move(TableRow(row_record)));
 	this->table_data_.pk2row.insert(std::make_pair(pk_str, this->table_data_.datas_.begin()));
 }

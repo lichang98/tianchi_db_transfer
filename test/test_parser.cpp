@@ -128,4 +128,12 @@ PRIMARY KEY NUMBER 1\n\
 	ASSERT_TRUE(op_parser.table_data_.pk2row.find("66") == op_parser.table_data_.pk2row.end());
 	ASSERT_TRUE(op_parser.table_data_.pk2row.find("67") != op_parser.table_data_.pk2row.end());
 	ASSERT_EQ(op_parser.table_data_.pk2row["67"], op_parser.table_data_.datas_.begin());
+	// Insert primary key already in the table
+	const char* rep_pk_row = "A	tianchi_dts_data	item	67	1158	4xxxxxxxxxxxxG	8.46	Y52pyaaaaaaaaaaaaaaallP";
+	op_parser.RecordInsert(rep_pk_row);
+	ASSERT_EQ(op_parser.table_data_.datas_.size(), 1);
+	ASSERT_EQ(op_parser.table_data_.pk2row.size(), 1);
+	ASSERT_EQ(op_parser.table_data_.update_before_queue_.size(), 0);
+	ASSERT_TRUE(op_parser.table_data_.pk2row.find("67") != op_parser.table_data_.pk2row.end());
+	ASSERT_EQ(op_parser.table_data_.pk2row["67"]->fields_[2], "4xxxxxxxxxxxxG");
 }
