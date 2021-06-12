@@ -35,3 +35,12 @@ test_parser: ./out/test_parser.cpp.o ./out/parser.cpp.o
 	mv test_parser ./out/
 
 .PHONY: test_parser
+
+./out/test_io_handler.cpp.o: ./test/test_io_handler.cpp /usr/local/include/gtest/gtest.h
+	$(CC) $(INC) -c ./test/test_io_handler.cpp -o ./out/test_io_handler.cpp.o
+
+test_io_handler: ./out/test_io_handler.cpp.o ./out/parser.cpp.o ./out/io_handler.cpp.o
+	$(CC) $(INC) $(LIBS) ./out/test_io_handler.cpp.o ./out/parser.cpp.o ./out/io_handler.cpp.o -o test_io_handler $(TEST_LINK)
+	mv test_io_handler ./out/
+
+.PHONY: test_io_handler
