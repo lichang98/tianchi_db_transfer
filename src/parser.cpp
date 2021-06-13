@@ -108,7 +108,7 @@ void db_transfer::OperationParser::ProcessOp(std::string op_record) {
 	}
 }
 
-std::string db_transfer::VerifyValid(std::string val, std::string col_def) {
+std::string db_transfer::VerifyValid(std::string val, std::string col_def, int extra_param_text_len) {
 	if (col_def.find("datetime") != std::string::npos) {
 		if (std::regex_match(val, std::regex("\\d{4}-\\d{2}-\\d{2}\\ \\d{2}:\\d{2}:\\d{2}\\.\\d{1}"))){
 			return val;
@@ -133,8 +133,13 @@ std::string db_transfer::VerifyValid(std::string val, std::string col_def) {
 			val = val.substr(0, n);
 		}
 		return val;
+	} else if (col_def.find("text") != std::string::npos) {
+		if (val.size() > extra_param_text_len) {
+			val = val.substr(0, extra_param_text_len);
+		}
+		return val;
 	} else {
-		if (!std::regex_match(val, std::regex("\\d+\\.\\d+"))) {
+		if (!std::regex_match(val, std::regex("-?\\d+\\.\\d+"))) {
 			return "0";
 		}
 		int left_brac_idx = col_def.find('(', 0);

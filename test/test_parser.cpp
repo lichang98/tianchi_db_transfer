@@ -186,4 +186,6 @@ TEST(PARSER, VERIFY_FIELD) {
 	ASSERT_EQ(val, "0.00");
 	val = db_transfer::VerifyValid("0.00721", "decimal(10,2)");
 	ASSERT_EQ(val, "0.01");
+	val = db_transfer::VerifyValid("-10.00", "decimal(10, 2)");
+	ASSERT_EQ(val, "-10.00");
 }

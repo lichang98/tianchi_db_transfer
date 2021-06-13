@@ -11,7 +11,7 @@ namespace db_transfer
 	Table ParseTable(std::string multi_line_str);
 
 	// Varify val according to col_def
-	std::string VerifyValid(std::string val, std::string col_def);
+	std::string VerifyValid(std::string val, std::string col_def, int extra_param_text_len=65535);
 
 	// == Parse operations and apply to table entity
 	// Each `OperationParser` processes operations according one table
