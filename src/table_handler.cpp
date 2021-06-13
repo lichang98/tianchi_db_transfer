@@ -1,11 +1,13 @@
 #include "include/table_handler.h"
 
 void db_transfer::TableData::SortRowsByPK(Table table_meta) {
-    std::set<int> pk_col_idxs;
+    std::vector<int> pk_col_idxs;
     for (auto index : table_meta.indexs_) {
-        for (auto col_name : index.index_cols_) {
-            int col_idx = table_meta.name2col_[col_name];
-            pk_col_idxs.insert(col_idx);
+        if (index.primary_) {
+            for (auto col_name : index.index_cols_) {
+                int col_idx = table_meta.name2col_[col_name];
+                pk_col_idxs.emplace_back(col_idx);
+            }
         }
     }
 

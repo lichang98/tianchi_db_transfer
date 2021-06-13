@@ -131,7 +131,7 @@ void db_transfer::OperationParser::RecordInsert(std::string op_record) {
 	// Insert pk2row map
 	std::string pk_str;
 	for (auto idx : this->primary_key_idxs) {
-		pk_str += row_record[idx];
+		pk_str += row_record[idx]+"|";
 	}
 	// Check primary key
 	if (this->table_data_.pk2row.find(pk_str) != this->table_data_.pk2row.end()) {

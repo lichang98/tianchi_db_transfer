@@ -43,10 +43,6 @@ namespace db_transfer
 					}
 				}
 			}
-			// Sort primary key idxs
-			std::sort(primary_key_idxs.begin(), primary_key_idxs.end());
-			// Sort unique key idxs
-			std::sort(unique_key_idxs.begin(), unique_key_idxs.end());
 		}
 
 		// The array index of primary key
