@@ -4,7 +4,7 @@
 #include <iostream>
 #include <tuple>
 
-std::vector<std::filesystem::path> GetSourceFiles(const char* input_dir) {
+std::vector<std::filesystem::path> GetSourceFiles(std::string input_dir) {
     std::vector<std::filesystem::path> input_file_paths;
     for (auto file_entry : std::filesystem::directory_iterator(input_dir)) {
         input_file_paths.emplace_back(file_entry.path());
@@ -46,8 +46,8 @@ std::tuple<std::vector<db_transfer::Table>, std::unordered_map<std::string, int>
  * 5: output_db_passwd
  */
 int main(int argc, char const *argv[]) {
-    std::vector<std::filesystem::path> input_files = GetSourceFiles("./demo-test/source_file_dir/source_file_dir");
-    std::string schema_file = "./demo-test/schema_info_dir/schema.info";
+    std::vector<std::filesystem::path> input_files = GetSourceFiles(std::string(argv[1])+"/source_file_dir");
+    std::string schema_file = "schema.info";
     std::tuple<std::vector<db_transfer::Table>, std::unordered_map<std::string, int>> ret = \
                 LoadTableMeta(schema_file);
     std::vector<db_transfer::Table> table_metas = std::get<0>(ret);
@@ -81,7 +81,7 @@ int main(int argc, char const *argv[]) {
     for (auto out_data : op_parsers) {
         std::cout << "Saving data of table " << out_data.table_meta_.table_name_ << ", data size=" << out_data.table_data_.datas_.size() << std::endl;
         out_data.table_data_.SortRowsByPK(out_data.table_meta_);
-        io_handler.SaveTableData(out_data.table_data_, "./out/"+out_data.table_meta_.table_name_);
+        io_handler.SaveTableData(out_data.table_data_, std::string(argv[2])+"/"+out_data.table_meta_.table_name_);
     }
 
     return 0;
