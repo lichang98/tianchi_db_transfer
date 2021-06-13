@@ -2,11 +2,16 @@
 // == Parser for parse records read from schema.info and data load from src data
 #include "include/io_handler.h"
 
+#include <regex>
+
 namespace db_transfer
 {
 	Column ParseColumnMeta(std::string json_str);
 	Index ParseIndexMeta(std::string json_str);
 	Table ParseTable(std::string multi_line_str);
+
+	// Varify val according to col_def
+	std::string VerifyValid(std::string val, std::string col_def);
 
 	// == Parse operations and apply to table entity
 	// Each `OperationParser` processes operations according one table

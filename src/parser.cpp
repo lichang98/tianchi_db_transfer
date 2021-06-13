@@ -108,6 +108,77 @@ void db_transfer::OperationParser::ProcessOp(std::string op_record) {
 	}
 }
 
+std::string db_transfer::VerifyValid(std::string val, std::string col_def) {
+	if (col_def.find("datetime") != std::string::npos) {
+		if (std::regex_match(val, std::regex("\\d{4}-\\d{2}-\\d{2}\\ \\d{2}:\\d{2}:\\d{2}\\.\\d{1}"))){
+			return val;
+		}
+		return "2020-04-01 00:00:00.0";
+	} else if (col_def.find("int") != std::string::npos) {
+		if (!std::regex_match(val, std::regex("\\d+"))) {
+			return "0";
+		}
+		int idx = 0;
+		idx = col_def.find('(', idx) + 1;
+		int n = std::stoi(col_def.substr(idx, col_def.size() - idx - 1));
+		if (val.size() > n) {
+			val = val.substr(val.size() - n);
+		}
+		return val;
+	} else if (col_def.find("char") != std::string::npos) {
+		int idx = 0;
+		idx = col_def.find('(', idx) + 1;
+		int n = std::stoi(col_def.substr(idx, col_def.size() - idx - 1));
+		if (val.size() > n) {
+			val = val.substr(0, n);
+		}
+		return val;
+	} else {
+		if (!std::regex_match(val, std::regex("\\d+\\.\\d+"))) {
+			return "0";
+		}
+		int left_brac_idx = col_def.find('(', 0);
+		int dot_idx = col_def.find(',', 0);
+		int right_brac_idx = col_def.find(')', 0);
+		int m = std::stoi(col_def.substr(left_brac_idx + 1, dot_idx - left_brac_idx - 1));
+		int n = std::stoi(col_def.substr(dot_idx + 1, right_brac_idx - dot_idx - 1));
+		int val_dot_idx = val.find('.');
+		std::string int_part = val.substr(0, val_dot_idx);
+		std::string fac_part = val.substr(val_dot_idx + 1);
+		if (fac_part.size() > n) {
+			if (fac_part[n] > '4') {
+				int carray = 1;
+				for (int i = n-1; i >=0 && carray == 1; --i) {
+					if (fac_part[i] == '9') {
+						fac_part[i] = '0';
+					} else {
+						carray = 0;
+						fac_part[i] += 1;
+					}
+				}
+				if (carray == 1) {
+					for (int i = int_part.size() - 1; i >=0 && carray == 1; --i) {
+						if (int_part[i] == '9') {
+							int_part[i] = '0';
+						} else {
+							carray = 0;
+							int_part[i] += 1;
+						}
+					}
+					if (carray == 1) {
+						int_part.insert(int_part.begin(), '1');
+					}
+				}
+			}
+			fac_part = fac_part.substr(0, n);
+		}
+		if (int_part.size() > (m - n)) {
+			int_part = int_part.substr(int_part.size() - (m - n));
+		}
+		return int_part+"."+fac_part;
+	}
+}
+
 std::vector<std::string> db_transfer::OperationParser::RowRecordsAsVec(std::string op_record) {
 	int idx = 0;
 	idx = op_record.find('\t', idx) + 1;
@@ -122,6 +193,10 @@ std::vector<std::string> db_transfer::OperationParser::RowRecordsAsVec(std::stri
 		next_idx++;
 	}
 	row_record.emplace_back(op_record.substr(idx));
+	// Verify fields and adjust
+	for (int i = 0; i < row_record.size(); ++i) {
+		row_record[i] = VerifyValid(row_record[i], table_meta_.columns_[i].col_def_);
+	}
 	return row_record;
 }
 
@@ -139,7 +214,7 @@ void db_transfer::OperationParser::RecordInsert(std::string op_record) {
 		*(this->table_data_.pk2row[pk_str]) = row_record;
 		return;
 	}
-	
+
 	this->table_data_.datas_.emplace_front(std::move(TableRow(row_record)));
 	this->table_data_.pk2row.insert(std::make_pair(pk_str, this->table_data_.datas_.begin()));
 }
@@ -148,7 +223,7 @@ void db_transfer::OperationParser::RecordPendingUpdate(std::string op_record) {
 	std::vector<std::string> row_record = this->RowRecordsAsVec(op_record);
 	std::string pk_str;
 	for (auto idx : this->primary_key_idxs) {
-		pk_str += row_record[idx];
+		pk_str += row_record[idx] + "|";
 	}
 	this->table_data_.update_before_queue_.push(pk_str);
 }
@@ -168,7 +243,7 @@ void db_transfer::OperationParser::RecordUpdate(std::string op_record) {
 	this->table_data_.pk2row.erase(pk_str);
 	pk_str = "";
 	for (auto idx : this->primary_key_idxs) {
-		pk_str += row_records[idx];
+		pk_str += row_records[idx] + "|";
 	}
 	this->table_data_.pk2row.insert(std::make_pair(pk_str, record_pos));
 }
@@ -177,7 +252,7 @@ void db_transfer::OperationParser::RecordDelete(std::string op_record) {
 	std::vector<std::string> row_record = this->RowRecordsAsVec(op_record);
 	std::string pk_str;
 	for (auto idx : this->primary_key_idxs) {
-		pk_str += row_record[idx];
+		pk_str += row_record[idx] + "|";
 	}
 	std::list<TableRow>::iterator record_pos = this->table_data_.pk2row[pk_str];
 	this->table_data_.datas_.erase(record_pos);

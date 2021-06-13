@@ -69,7 +69,7 @@ int main(int argc, char const *argv[]) {
         bool avail = true;
         std::string table_name;
         std::string op_line = io_handler.LoadSrcDataNextLine(in_file.generic_string(), avail, table_name);
-        std::cout << "Processing for table " << table_name << " ..." << std::endl;
+        std::cout << "Processing input file: " << in_file.filename() << " ..." << std::endl;
         while (avail) {
             int idx = table_name2meta_idx[table_name];
             op_parsers[idx].ProcessOp(op_line);

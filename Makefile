@@ -1,5 +1,5 @@
 CC=g++
-CFLAGS=-std=c++17
+CFLAGS=-std=c++17 -O3
 INC=-I. -I/usr/local/include
 LIBS=-L /usr/local/lib
 TEST_LINK=-lgtest -lgtest_main
