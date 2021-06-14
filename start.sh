@@ -1,5 +1,7 @@
 #!/bin/sh
 
+make
+echo "start"
 case $1 in
 	--input_dir)
 		in_dir=$2
@@ -19,4 +21,5 @@ case $3 in
 esac
 
 ./transfer ${in_dir} ${out_dir}
-
+echo "end"
+exit 0

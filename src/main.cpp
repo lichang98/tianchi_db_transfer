@@ -4,6 +4,14 @@
 #include <iostream>
 #include <tuple>
 
+const std::string DATABASE_NAME = "tianchi_dts_data";
+const std::string SCHEMA_FILE_DIR = "schema_info_dir";
+const std::string SCHEMA_FILE_NAME = "schema.info";
+const std::string SOURCE_FILE_DIR = "source_file_dir";
+const std::string SINK_FILE_DIR = "sink_file_dir";
+const std::string SOURCE_FILE_NAME_TEMPLATE = "tianchi_dts_source_data_";
+const std::string SINK_FILE_NAME_TEMPLATE = "tianchi_dts_sink_data_";
+
 std::vector<std::filesystem::path> GetSourceFiles(std::string input_dir) {
     std::vector<std::filesystem::path> input_file_paths;
     for (auto file_entry : std::filesystem::directory_iterator(input_dir)) {
@@ -46,8 +54,8 @@ std::tuple<std::vector<db_transfer::Table>, std::unordered_map<std::string, int>
  * 5: output_db_passwd
  */
 int main(int argc, char const *argv[]) {
-    std::vector<std::filesystem::path> input_files = GetSourceFiles(std::string(argv[1])+"/source_file_dir");
-    std::string schema_file = "schema.info";
+    std::vector<std::filesystem::path> input_files = GetSourceFiles(std::string(argv[1])+"/"+SOURCE_FILE_DIR);
+    std::string schema_file = std::string(argv[1])+"/"+SCHEMA_FILE_DIR+"/"+SCHEMA_FILE_NAME;
     std::tuple<std::vector<db_transfer::Table>, std::unordered_map<std::string, int>> ret = \
                 LoadTableMeta(schema_file);
     std::vector<db_transfer::Table> table_metas = std::get<0>(ret);
@@ -78,10 +86,11 @@ int main(int argc, char const *argv[]) {
     }
 
     // Save records for each table
+    std::filesystem::create_directory(std::string(argv[2])+"/"+SINK_FILE_DIR);
     for (auto out_data : op_parsers) {
         std::cout << "Saving data of table " << out_data.table_meta_.table_name_ << ", data size=" << out_data.table_data_.datas_.size() << std::endl;
         out_data.table_data_.SortRowsByPK(out_data.table_meta_);
-        io_handler.SaveTableData(out_data.table_data_, std::string(argv[2])+"/"+out_data.table_meta_.table_name_);
+        io_handler.SaveTableData(out_data.table_data_, std::string(argv[2])+"/"+SINK_FILE_DIR+"/"+SINK_FILE_NAME_TEMPLATE+out_data.table_meta_.table_name_);
     }
 
     return 0;
