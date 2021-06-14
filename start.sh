@@ -20,6 +20,7 @@ case $3 in
 		;;
 esac
 
+mkdir ${out_dir}"/sink_file_dir"
 ./transfer ${in_dir} ${out_dir}
 echo "end"
 exit 0
