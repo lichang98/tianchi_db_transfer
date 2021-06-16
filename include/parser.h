@@ -27,6 +27,8 @@ namespace db_transfer
 		std::string GetTableNameFromOp(std::string op_record);
 
 		std::vector<std::string> RowRecordsAsVec(std::string op_record);
+		// Get primary key in string format split with '|' from raw line record
+		std::string GetPKFromSrcRowRecord(std::string row_record);
 
 
 		OperationParser() {}

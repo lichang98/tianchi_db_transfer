@@ -92,6 +92,17 @@ namespace db_transfer
 	};
 
 
+	class FilePos
+	{
+	public:
+		FilePos() {}
+		FilePos(int32_t file_no, int64_t pos): file_no_(file_no), pos_(pos) {}
+
+		int32_t file_no_;
+		int64_t pos_;
+	};
+	
+
 	class TableData
 	{
 	public:
@@ -100,6 +111,9 @@ namespace db_transfer
 		std::queue<std::string> update_before_queue_;
 		// Map from primary key to row record
 		std::unordered_map<std::string, std::list<TableRow>::iterator> pk2row;
+
+		// In multi-thread mode, do not save data directly in memory, save the position in file instead
+		std::unordered_map<std::string, FilePos> pk2file_pos_;
 
 		void SortRowsByPK(Table table_meta);
 	};

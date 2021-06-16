@@ -22,6 +22,8 @@ namespace db_transfer {
 			std::string LoadSrcDataNextLine(const std::string src_fpath, bool &data_avail, std::string &table_name);
 			// After loading and processing src data, save it to file by row
 			void SaveTableData(TableData table_data, std::string save_file_path);
+			// Get current position in file
+			int64_t GetCurrPosition();
 
 			std::stringstream ss_;
 			std::fstream schema_fs_;

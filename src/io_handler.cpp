@@ -52,6 +52,10 @@ std::string db_transfer::IOHandler::LoadSrcDataNextLine(const std::string src_fp
 	return line_str;
 }
 
+int64_t db_transfer::IOHandler::GetCurrPosition() {
+	return this->src_data_fs_.tellg();
+}
+
 void db_transfer::IOHandler::SaveTableData(TableData table_data, std::string save_file_path) {
 	std::fstream fs;
 	fs.open(save_file_path, std::fstream::out);

@@ -3,9 +3,10 @@ CFLAGS=-std=c++14 -O3
 INC=-I. -I/usr/local/include
 LIBS=-L /usr/local/lib
 TEST_LINK=-lgtest -lgtest_main
+LINK=-lpthread
 
 transfer: ./out/main.cpp.o ./out/io_handler.cpp.o ./out/parser.cpp.o ./out/table_handler.cpp.o
-	$(CC) ./out/main.cpp.o ./out/io_handler.cpp.o ./out/parser.cpp.o ./out/table_handler.cpp.o -o transfer 
+	$(CC) ./out/main.cpp.o ./out/io_handler.cpp.o ./out/parser.cpp.o ./out/table_handler.cpp.o -o transfer $(LINK)
 
 ./out/main.cpp.o: ./src/main.cpp
 	$(CC) $(INC) $(CFLAGS) -c ./src/main.cpp -o ./out/main.cpp.o

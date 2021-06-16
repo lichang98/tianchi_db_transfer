@@ -198,10 +198,10 @@ std::vector<std::string> db_transfer::OperationParser::RowRecordsAsVec(std::stri
 		next_idx++;
 	}
 	row_record.emplace_back(op_record.substr(idx));
-	// Verify fields and adjust
-	for (int i = 0; i < row_record.size(); ++i) {
-		row_record[i] = VerifyValid(row_record[i], table_meta_.columns_[i].col_def_);
-	}
+	// // Verify fields and adjust
+	// for (int i = 0; i < row_record.size(); ++i) {
+	// 	row_record[i] = VerifyValid(row_record[i], table_meta_.columns_[i].col_def_);
+	// }
 	return row_record;
 }
 
@@ -222,6 +222,15 @@ void db_transfer::OperationParser::RecordInsert(std::string op_record) {
 
 	this->table_data_.datas_.emplace_front(std::move(TableRow(row_record)));
 	this->table_data_.pk2row.insert(std::make_pair(pk_str, this->table_data_.datas_.begin()));
+}
+
+std::string db_transfer::OperationParser::GetPKFromSrcRowRecord(std::string row_record) {
+	std::vector<std::string> row_vec = this->RowRecordsAsVec(row_record);
+	std::string pk_str;
+	for (auto idx : this->primary_key_idxs) {
+		pk_str += row_vec[idx]+"|";
+	}
+	return pk_str;
 }
 
 void db_transfer::OperationParser::RecordPendingUpdate(std::string op_record) {
