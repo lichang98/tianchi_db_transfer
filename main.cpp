@@ -25,10 +25,6 @@
 #include <unordered_set>
 #include <chrono>
 
-const auto THREAD_WAIT_TIME = std::chrono::milliseconds(10);
-const int QUEUE_MAX_SIZE = 10000;
-volatile int alive_src_th = 0;
-std::mutex mut_alive_src_th;
 
 struct column_t {
     std::string col_name_;
@@ -265,7 +261,7 @@ std::string CheckField(std::string &fld, const std::string &col_def) {
 		idx = col_def.find('(', idx) + 1;
 		int n = std::stoi(col_def.substr(idx, col_def.size() - idx - 1));
 		if (fld.size() > n) {
-			fld = fld.substr(fld.size() - n);
+			fld = std::move(fld.substr(fld.size() - n));
 		}
 		return fld;
     } else if (col_def.find("char") != col_def.npos) {
@@ -273,7 +269,7 @@ std::string CheckField(std::string &fld, const std::string &col_def) {
 		idx = col_def.find('(', idx) + 1;
 		int n = std::stoi(col_def.substr(idx, col_def.size() - idx - 1));
 		if (fld.size() > n) {
-			fld = fld.substr(0, n);
+			fld = std::move(fld.substr(0, n));
 		}
 		return fld;
     } else if (col_def.find("text") != col_def.npos) {
@@ -311,7 +307,7 @@ void LineVerify(char *line, std::unordered_map<std::string, int> &tblname2idx, i
     int fld_len = 0;
     fld_len = strcspn(line + prev_pos + 1, "\t");
     do {
-        line_vec.emplace_back(std::string(line + prev_pos + 1, fld_len));
+        line_vec.emplace_back(std::move(std::string(line + prev_pos + 1, fld_len)));
         prev_pos += fld_len + 1;
         fld_len = strcspn(line + prev_pos + 1, "\t");
     } while (fld_len > 0);
@@ -354,40 +350,26 @@ void SrcRoutine(std::string &src_file_path, \
         std::pair<std::string, struct record_meta_t> line_info;
         LineVerify(buf, tblname2idx, tbl_idx, tbl_metas, src_file_no, line_pos, line_info);
         // Send to target table thread by queue
-        // TODO
-        // while (table_queues[tbl_idx].size() > QUEUE_MAX_SIZE) {
-        //     std::this_thread::sleep_for(THREAD_WAIT_TIME);
-        // }
         mut_tbls[tbl_idx].lock();
-        table_queues[tbl_idx].emplace(line_info);
+        table_queues[tbl_idx].emplace(std::move(line_info));
         mut_tbls[tbl_idx].unlock();
         line_pos = fs.tellg();
     }
     fs.close();
     delete[] buf;
-    mut_alive_src_th.lock();
-    --alive_src_th;
-    mut_alive_src_th.unlock();
 }
 
-void TableRoutine(std::queue<std::pair<std::string, struct record_meta_t>> &que, struct table_t &meta, std::mutex &mut,\
+void TableRoutine(std::queue<std::pair<std::string, struct record_meta_t>> &que, struct table_t &meta,\
                     std::vector<std::string> &src_files_path,const std::string &output_dir) {
     std::unordered_map<std::string, struct record_meta_t> pk2lineinfo;
     const int buf_size = 1024;
     char *buf = new char[buf_size];
     bzero(buf, buf_size);
-    while (alive_src_th > 0 || !que.empty()) {
-        // TODO
-        // while (que.empty()) {
-        //     std::this_thread::sleep_for(THREAD_WAIT_TIME);
-        // }
-        mut.lock();
-        std::pair<std::string, struct record_meta_t> ele = que.front();
+    while (!que.empty()) {
+        std::pair<std::string, struct record_meta_t> ele = std::move(que.front());
         que.pop();
-        mut.unlock();
-
         if (pk2lineinfo.find(ele.first) == pk2lineinfo.end()) { 
-            pk2lineinfo.insert(ele); 
+            pk2lineinfo.insert(std::move(ele)); 
         } else {
             auto&& old_ele = pk2lineinfo.at(ele.first);
             if (ele.second.file_no_ > old_ele.file_no_ ||\
@@ -427,7 +409,7 @@ void TableRoutine(std::queue<std::pair<std::string, struct record_meta_t>> &que,
         std::string field_a, field_b;
         int idx = 0;
         while (std::getline(ss_a, field_a, '|') && std::getline(ss_b, field_b, '|')) {
-            if (meta.colunms_[table_pk_idxs[idx]].col_def_.find("int") != std::string::npos) {
+            if (__glibc_likely(meta.colunms_[table_pk_idxs[idx]].col_def_.find("int") != std::string::npos)) {
                 int key1 = std::stoi(field_a);
                 int key2 = std::stoi(field_b);
                 if (key1 != key2) { return key1 < key2; }
@@ -454,16 +436,16 @@ void TableRoutine(std::queue<std::pair<std::string, struct record_meta_t>> &que,
         int fld_len = 0;
         fld_len = strcspn(buf + prev_pos + 1, "\t");
         do {
-            line_vec.emplace_back(std::string(buf + prev_pos + 1, fld_len));
+            line_vec.emplace_back(std::move(std::string(buf + prev_pos + 1, fld_len)));
             prev_pos += fld_len + 1;
             fld_len = strcspn(buf + prev_pos + 1, "\t");
         } while (fld_len > 0);
         line_vec.erase(line_vec.begin(), line_vec.begin() + 3);
         // Verify and write
-        line_vec[0] = CheckField(line_vec[0], meta.colunms_[0].col_def_);
+        line_vec[0] = std::move(CheckField(line_vec[0], meta.colunms_[0].col_def_));
         out_fs << line_vec[0];
         for (int i = 1; i < line_vec.size(); ++i) {
-            line_vec[i] = CheckField(line_vec[i], meta.colunms_[i].col_def_);
+            line_vec[i] = std::move(CheckField(line_vec[i], meta.colunms_[i].col_def_));
             out_fs << "\t" << line_vec[i];
         }
     };
@@ -500,32 +482,19 @@ int main(int argc, char const *argv[]) {
     }
     std::vector<std::mutex> mut_tbls(tables.size());
     std::vector<std::queue<std::pair<std::string, struct record_meta_t>>> table_queues(tables.size());
-    alive_src_th = src_file_paths.size();
-
-    // std::vector<std::thread> table_ths;
-    // for (int i = 0; i < tables.size(); ++i) {
-    //     std::thread th(TableRoutine, std::ref(table_queues[i]), std::ref(tables[i]), std::ref(mut_tbls[i]), std::ref(src_file_paths), std::ref(output_dir));
-    //     table_ths.emplace_back(std::move(th));
-    // }
 
     std::vector<std::thread> src_ths;
     for (int i = 0; i < src_file_paths.size(); ++i) {
         std::thread th(SrcRoutine, std::ref(src_file_paths[i]), std::ref(mut_tbls), std::ref(tblname2idx), std::ref(tables), std::ref(table_queues));
         src_ths.emplace_back(std::move(th));
     }
-
-    // for (int i = 0; i < table_ths.size(); ++i) {
-    //     table_ths[i].join();
-    // }
-
     for (int i = 0; i < src_file_paths.size(); ++i) {
         src_ths[i].join();
     }
 
-
     for (int i = 0; i < tables.size(); ++i) {
         std::cout << "Processing table #" << i << " ..." << std::endl;
-        TableRoutine(table_queues[i], tables[i], mut_tbls[i], src_file_paths, output_dir);;
+        TableRoutine(table_queues[i], tables[i],src_file_paths, output_dir);;
     }
     return 0;
 }
