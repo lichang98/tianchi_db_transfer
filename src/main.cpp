@@ -16,9 +16,11 @@ const std::string SOURCE_FILE_DIR = "source_file_dir";
 const std::string SINK_FILE_DIR = "sink_file_dir";
 const std::string SOURCE_FILE_NAME_TEMPLATE = "tianchi_dts_source_data_";
 const std::string SINK_FILE_NAME_TEMPLATE = "tianchi_dts_sink_data_";
-const int QUEUE_MAX_SIZE = 100;
+const int QUEUE_MAX_SIZE = 1000;
 // Wait for n milliseconds when queue is empty
-const int TABLE_WAIT_QUEUE_EMPTY_TIMEOUT = 1000;
+const int TABLE_WAIT_QUEUE_EMPTY_TIMEOUT = 10;
+volatile int alive_src_threads = 0;
+std::mutex mutex_alive_src_threads;
 
 std::vector<std::string> GetSourceFiles(std::string input_dir) {
     std::vector<std::string> input_file_paths;
@@ -98,42 +100,54 @@ int main(int argc, char const *argv[]) {
     std::vector<std::unordered_map<std::string, db_transfer::FilePos>> table_valid_records(table_name2meta_idx.size());
 
     // Each source file one thread
-    // TODO
     auto thread_routine = [&tables_queues, &queues_mutexs, &table_name2meta_idx, &op_parsers](std::string src_file, int curr_idx)->void {
         // Read lines from src_file, and put records onto corresponding table's queue, need mutex lock
+        std::cout << "Thread #" << std::this_thread::get_id() << " start loading lines" << std::endl;
         db_transfer::IOHandler io_handler;
         bool data_avail = true;
         std::string table_name;
         int64_t curr_pos = 0;
         std::string line = io_handler.LoadSrcDataNextLine(src_file, data_avail, table_name);
         int table_idx = table_name2meta_idx[table_name];
+        queues_mutexs[table_idx].lock();
         std::string pk_str = op_parsers[table_idx].GetPKFromSrcRowRecord(line);
+        queues_mutexs[table_idx].unlock();
         while (data_avail) {
             std::pair<std::string, db_transfer::FilePos> row_record = std::make_pair(pk_str, db_transfer::FilePos(curr_idx, curr_pos));
+            while (tables_queues[table_idx].size() > QUEUE_MAX_SIZE) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(TABLE_WAIT_QUEUE_EMPTY_TIMEOUT));
+            }
             queues_mutexs[table_idx].lock();
-            tables_queues[table_idx].push(std::move(row_record));
+            tables_queues[table_idx].emplace(row_record);
             queues_mutexs[table_idx].unlock();
 
             curr_pos = io_handler.GetCurrPosition();
             line = io_handler.LoadSrcDataNextLine(src_file, data_avail, table_name);
             if (data_avail) {
                 table_idx = table_name2meta_idx[table_name];
+                queues_mutexs[table_idx].lock();
                 pk_str = op_parsers[table_idx].GetPKFromSrcRowRecord(line);
+                queues_mutexs[table_idx].unlock();
             }
         }
+        mutex_alive_src_threads.lock();
+        alive_src_threads--;
+        mutex_alive_src_threads.unlock();
     };
 
     auto table_thread_routine = [&tables_queues, &queues_mutexs, &op_parsers, &table_valid_records, &input_files, &output_dir](int table_idx)->void {
         std::pair<std::string, db_transfer::FilePos> record;
+        std::cout << "Table routine #" << std::this_thread::get_id() << " started" << std::endl;
         while (true) {
-            if (tables_queues[table_idx].empty()) {
+            while (tables_queues[table_idx].empty() && alive_src_threads > 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(TABLE_WAIT_QUEUE_EMPTY_TIMEOUT));
-                if (tables_queues[table_idx].empty()) {
-                    break;
-                }
             }
             // Fetch one record from queue, check conflict of primary key and update records
             queues_mutexs[table_idx].lock();
+            if (tables_queues[table_idx].empty()) {
+                queues_mutexs[table_idx].unlock();
+                break;
+            }
             record = tables_queues[table_idx].front();
             tables_queues[table_idx].pop();
             queues_mutexs[table_idx].unlock();
@@ -224,25 +238,28 @@ int main(int argc, char const *argv[]) {
         output_fhandler.close();
     };
 
-    // Start source files processing threads
-    for (auto &in_file : input_files) {
-        int idx = in_file.find_last_of('_') + 1;
-        idx = std::stoi(in_file.substr(idx));
-        // std::thread th(thread_routine, in_file, idx);
-        std::cout << "in _file = " << in_file << ", idx=" << idx << std::endl;
-        thread_routine(in_file, idx);
-    }
-
-    std::cout << "started all thread routine.." << std::endl;
+    std::cout << "Start all src thread routines" << std::endl;
     std::vector<std::thread> table_threads;
+    alive_src_threads = input_files.size();
     // Start table threads
     for (int i = 0; i < table_metas.size(); ++i) {
         std::thread th(table_thread_routine, i);
         table_threads.emplace_back(std::move(th));
     }
 
+    // Start source files processing threads
+    std::vector<std::thread> src_threads;
+    for (int i = 0; i < input_files.size(); ++i) {
+        int idx = input_files[i].find_last_of('_') + 1;
+        idx = std::stoi(input_files[i].substr(idx));
+        std::cout << "Src thread for src file = " << input_files[i] << ", idx=" << idx << std::endl;
+        src_threads.emplace_back(std::move(std::thread(thread_routine, input_files[i], idx)));
+    }
     for (int i = 0; i < table_metas.size(); ++i) {
         table_threads[i].join();
+    }
+    for (int i = 0; i < input_files.size(); ++i) {
+        src_threads[i].join();
     }
     std::cout << "Done." << std::endl;
     return 0;
