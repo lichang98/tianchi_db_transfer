@@ -18,11 +18,17 @@
 
 #include <vector>
 #include <unordered_map>
+#include <map>
 #include <thread>
 #include <queue>
 #include <mutex>
 #include <unordered_set>
+#include <chrono>
 
+const auto THREAD_WAIT_TIME = std::chrono::milliseconds(10);
+const int QUEUE_MAX_SIZE = 10000;
+volatile int alive_src_th = 0;
+std::mutex mut_alive_src_th;
 
 struct column_t {
     std::string col_name_;
@@ -36,14 +42,14 @@ struct column_t {
     int32_t precis_;
     // Only for decimal, otherwise -1
     int32_t scale_;
-};
+} __attribute__ ((aligned(64)));
 
 struct index_t {
     std::string name_;
     std::vector<int> index_cols_;
     bool primary_;
     bool unique_;
-};
+} __attribute__  ((aligned(64)));
 
 struct table_t {
     std::string db_name_;
@@ -52,7 +58,12 @@ struct table_t {
     std::vector<index_t> indexs_;
 
     std::unordered_map<std::string, int> name2col_;
-};
+} __attribute__  ((aligned(64)));
+
+struct record_meta_t {
+    int32_t file_no_;
+    int64_t pos_;
+} __attribute__  ((aligned(64)));
 
 struct column_t ParseColumnMeta(std::string &table_meta_buf) {
     struct column_t col;
@@ -210,13 +221,15 @@ bool CheckDateTime(std::string &val) {
             return false;
     }
     if (val[4] != '-' || val[7] != '-') { return false; }
-    if (val[13] != ':' || val[16] != ':' || val[19] != '.') { return false; }
+    if (val[10] != ' ' || val[13] != ':' || val[16] != ':' || val[19] != '.') { return false; }
     return true;
 }
 
 bool CheckInt(std::string &val) {
-    for (auto& ch : val) {
-        if (!isdigit(ch)) {
+    if (val[0] != '-' && !isdigit(val[0])) { return false; }
+    int i = 1;
+    for (; i < val.size(); ++i) {
+        if (!isdigit(val[i])) {
             return false;
         }
     }
@@ -229,10 +242,12 @@ bool CheckDecimal(std::string &val) {
         return false;
     }
     int val_size = val.size();
-    for (int i = 0; i < dot_pos; ++i) {
+    if (val[0] != '-' && !isdigit(val[0])) { return false; }
+    int i = 1;
+    for (; i < dot_pos; ++i) {
         if (!isdigit(val[i])) { return false; }
     }
-    for (int i = dot_pos + 1; i < val_size; ++i) {
+    for (i = dot_pos + 1; i < val_size; ++i) {
         if (!isdigit(val[i])) { return false; }
     }
     return true;
@@ -271,14 +286,26 @@ std::string CheckField(std::string &fld, const std::string &col_def) {
 		int right_brac_idx = col_def.find(')', 0);
 		int n = std::stoi(col_def.substr(dot_idx + 1, right_brac_idx - dot_idx - 1));
         char val[32] = {'\0'};
-        sprintf(val, "%.*lf", n, std::stod(fld));
+        if (fld[0] == '-') {
+            sprintf(val, "%.*lf", n, std::stod(fld) - 1e-10);
+        } else {
+            sprintf(val, "%.*lf", n, std::stod(fld) + 1e-10);
+        }
         return std::string(val);
     }
 }
 
-// Line records verified and in the format file_no|pos \t primary key \t origin fields
-std::vector<std::string> LineVerify(char *line, std::unordered_map<std::string, int> &tblname2idx, int &tbl_idx, \
-                        std::vector<struct table_t> &tbl_metas, int src_file_no, int64_t line_pos) {
+// Line records verified and in the format file_no|pos \\t primary key \\t origin fields
+// line: string , line record
+// tblnam2idx: map from table name to table index in vector
+// tbl_idx[out_param]:
+// tbl_metas: meta info of each table
+// src_file_no: source file no of this thread
+// line_pos: the position in the file of the line
+// line_rec_meta[out_param]: the file no and position in source file of the line
+void LineVerify(char *line, std::unordered_map<std::string, int> &tblname2idx, int &tbl_idx, \
+                        std::vector<struct table_t> &tbl_metas, int src_file_no, int64_t line_pos, \
+                        std::pair<std::string, struct record_meta_t> &line_rec_meta) {
     std::vector<std::string> line_vec;
     int prev_pos = -1;
     int fld_len = 0;
@@ -292,12 +319,6 @@ std::vector<std::string> LineVerify(char *line, std::unordered_map<std::string, 
     tbl_idx = tblname2idx.at(tbl_name);
 
     line_vec.erase(line_vec.begin(), line_vec.begin() + 3);
-    auto&& col_meta = tbl_metas[tbl_idx].colunms_;
-    // // Verify fields
-    for (int i = 0; i < line_vec.size(); ++i) {
-        line_vec[i] = std::move(CheckField(line_vec[i], col_meta[i].col_def_));
-    }
-    // Insert file_no&pos and primary key
     auto&& tbl_meta = tbl_metas[tbl_idx];
     std::vector<int> pk_col_idxs;
     for (auto& idx : tbl_meta.indexs_) {
@@ -307,20 +328,19 @@ std::vector<std::string> LineVerify(char *line, std::unordered_map<std::string, 
             }
         }
     }
-    std::string pk_str;
-    for (auto& idx : pk_col_idxs) {
-        pk_str += line_vec[idx] + "|";
+    std::stringstream pk_str;
+    for (auto &idx : pk_col_idxs) {
+        pk_str << line_vec[idx] << "|";
     }
-    // Insert primary key into line_vec
-    line_vec.insert(line_vec.begin(), pk_str);
-    line_vec.insert(line_vec.begin(), std::to_string(line_pos));
-    line_vec.insert(line_vec.begin(), std::to_string(src_file_no));
-    return line_vec;
+    struct record_meta_t line_info;
+    line_info.file_no_ = src_file_no;
+    line_info.pos_ = line_pos;
+    line_rec_meta = std::make_pair(pk_str.str(), std::move(line_info));
 }
 
-void SrcRoutine(std::vector<std::fstream> &fs_tmp_tbls, std::string &src_file_path, \
+void SrcRoutine(std::string &src_file_path, \
             std::vector<std::mutex> &mut_tbls, std::unordered_map<std::string, int> &tblname2idx,\
-            std::vector<struct table_t> &tbl_metas) {
+            std::vector<struct table_t> &tbl_metas, std::vector<std::queue<std::pair<std::string, struct record_meta_t>>> &table_queues) {
     std::fstream fs;
     const int buf_size = 1024;
     int src_file_no = std::stoi(src_file_path.substr(src_file_path.find_last_of('_') + 1));
@@ -331,19 +351,139 @@ void SrcRoutine(std::vector<std::fstream> &fs_tmp_tbls, std::string &src_file_pa
         bzero(buf, buf_size);
         fs.getline(buf, buf_size);
         int tbl_idx = 0;
-        std::vector<std::string>&& line_verified = LineVerify(buf, tblname2idx, tbl_idx, tbl_metas, src_file_no, line_pos);
-        // Write verified line record to target table's file
+        std::pair<std::string, struct record_meta_t> line_info;
+        LineVerify(buf, tblname2idx, tbl_idx, tbl_metas, src_file_no, line_pos, line_info);
+        // Send to target table thread by queue
+        // TODO
+        // while (table_queues[tbl_idx].size() > QUEUE_MAX_SIZE) {
+        //     std::this_thread::sleep_for(THREAD_WAIT_TIME);
+        // }
         mut_tbls[tbl_idx].lock();
-        int i = 0;
-        fs_tmp_tbls[tbl_idx] << line_verified[i++];
-        while (i < line_verified.size()) {
-            fs_tmp_tbls[tbl_idx] << "\t" << line_verified[i++];
-        }
-        fs_tmp_tbls[tbl_idx] << "\n";
+        table_queues[tbl_idx].emplace(line_info);
         mut_tbls[tbl_idx].unlock();
         line_pos = fs.tellg();
     }
     fs.close();
+    delete[] buf;
+    mut_alive_src_th.lock();
+    --alive_src_th;
+    mut_alive_src_th.unlock();
+}
+
+void TableRoutine(std::queue<std::pair<std::string, struct record_meta_t>> &que, struct table_t &meta, std::mutex &mut,\
+                    std::vector<std::string> &src_files_path,const std::string &output_dir) {
+    std::unordered_map<std::string, struct record_meta_t> pk2lineinfo;
+    const int buf_size = 1024;
+    char *buf = new char[buf_size];
+    bzero(buf, buf_size);
+    while (alive_src_th > 0 || !que.empty()) {
+        // TODO
+        // while (que.empty()) {
+        //     std::this_thread::sleep_for(THREAD_WAIT_TIME);
+        // }
+        mut.lock();
+        std::pair<std::string, struct record_meta_t> ele = que.front();
+        que.pop();
+        mut.unlock();
+
+        if (pk2lineinfo.find(ele.first) == pk2lineinfo.end()) { 
+            pk2lineinfo.insert(ele); 
+        } else {
+            auto&& old_ele = pk2lineinfo.at(ele.first);
+            if (ele.second.file_no_ > old_ele.file_no_ ||\
+                (ele.second.file_no_ == old_ele.file_no_ && ele.second.pos_ > old_ele.pos_)) {
+                pk2lineinfo[ele.first] = ele.second;
+            }
+        }
+    }
+    std::cout << "Opening source files ..." << std::endl;
+    std::vector<std::fstream> fs_vec(src_files_path.size() + 1);
+    for (int i = 1; i < fs_vec.size(); ++i) {
+        fs_vec[i].open(src_files_path[i - 1]);
+    }
+    std::cout << "Opening source files Finished." << std::endl;
+    // Load from src file by lines records, verify and write to output file
+    const std::string& table_name = meta.table_name_;
+    std::fstream out_fs;
+    out_fs.open(output_dir+"/"+table_name, std::fstream::out);
+    int rec_count = pk2lineinfo.size();
+    std::vector<std::pair<std::string, struct record_meta_t>> line_info_vec;
+    for (auto &ele : pk2lineinfo) {
+        line_info_vec.emplace_back(std::move(ele));
+    }
+    std::vector<int> table_pk_idxs;
+    for (auto &col : meta.indexs_) {
+        if (col.primary_) {
+            for (auto &index_col_idx : col.index_cols_) {
+                table_pk_idxs.emplace_back(index_col_idx);
+            }
+        }
+    }
+    std::cout << "Sorting ..." << std::endl;
+    std::sort(line_info_vec.begin(), line_info_vec.end(),[&meta, &table_pk_idxs](const std::pair<std::string, struct record_meta_t> &a,\
+                const std::pair<std::string, struct record_meta_t> &b)->bool{
+        std::stringstream ss_a(a.first);
+        std::stringstream ss_b(b.first);
+        std::string field_a, field_b;
+        int idx = 0;
+        while (std::getline(ss_a, field_a, '|') && std::getline(ss_b, field_b, '|')) {
+            if (meta.colunms_[table_pk_idxs[idx]].col_def_.find("int") != std::string::npos) {
+                int key1 = std::stoi(field_a);
+                int key2 = std::stoi(field_b);
+                if (key1 != key2) { return key1 < key2; }
+            } else if (meta.colunms_[table_pk_idxs[idx]].col_def_.find("char") != std::string::npos) {
+                if (field_a != field_b) { return field_a < field_b; }
+            } else {
+                double key1 = std::stod(field_a);
+                double key2 = std::stod(field_b);
+                if (key1 != key2) { return key1 < key2; }
+            }
+            idx++;
+        }
+        return false;
+    });
+
+    std::cout << "Sorting finish." << std::endl;
+    auto result_io_routine = [&fs_vec, buf, buf_size, &meta, &out_fs](std::pair<std::string, record_meta_t> &ele)->void {
+        // Load from src file
+        fs_vec[ele.second.file_no_].seekg(ele.second.pos_);
+        bzero(buf, buf_size);
+        fs_vec[ele.second.file_no_].getline(buf, buf_size);
+        std::vector<std::string> line_vec;
+        int prev_pos = -1;
+        int fld_len = 0;
+        fld_len = strcspn(buf + prev_pos + 1, "\t");
+        do {
+            line_vec.emplace_back(std::string(buf + prev_pos + 1, fld_len));
+            prev_pos += fld_len + 1;
+            fld_len = strcspn(buf + prev_pos + 1, "\t");
+        } while (fld_len > 0);
+        line_vec.erase(line_vec.begin(), line_vec.begin() + 3);
+        // Verify and write
+        line_vec[0] = CheckField(line_vec[0], meta.colunms_[0].col_def_);
+        out_fs << line_vec[0];
+        for (int i = 1; i < line_vec.size(); ++i) {
+            line_vec[i] = CheckField(line_vec[i], meta.colunms_[i].col_def_);
+            out_fs << "\t" << line_vec[i];
+        }
+    };
+    
+    std::cout << "Start write, line info vec size=" << line_info_vec.size() << std::endl;
+    for (auto &ele : line_info_vec) {
+        result_io_routine(ele);
+        if (__glibc_likely(--rec_count > 0)) {
+            out_fs << "\n";
+        }
+    }
+
+    std::cout << "Write records finished." << std::endl;
+
+    for (int i = 1; i < fs_vec.size(); ++i) {
+        fs_vec[i].close();
+    }
+
+    out_fs.close();
+    delete[] buf;
 }
 
 
@@ -359,63 +499,33 @@ int main(int argc, char const *argv[]) {
         tblname2idx.insert(std::make_pair(tables[i].table_name_, i));
     }
     std::vector<std::mutex> mut_tbls(tables.size());
-    std::vector<std::fstream> fs_tmp_tbls;
-    for (int i = 0; i < tables.size(); ++i) {
-        std::fstream fs;
-        fs.open("tmp"+std::to_string(i)+".txt", std::fstream::out);
-        fs_tmp_tbls.emplace_back(std::move(fs));
+    std::vector<std::queue<std::pair<std::string, struct record_meta_t>>> table_queues(tables.size());
+    alive_src_th = src_file_paths.size();
+
+    // std::vector<std::thread> table_ths;
+    // for (int i = 0; i < tables.size(); ++i) {
+    //     std::thread th(TableRoutine, std::ref(table_queues[i]), std::ref(tables[i]), std::ref(mut_tbls[i]), std::ref(src_file_paths), std::ref(output_dir));
+    //     table_ths.emplace_back(std::move(th));
+    // }
+
+    std::vector<std::thread> src_ths;
+    for (int i = 0; i < src_file_paths.size(); ++i) {
+        std::thread th(SrcRoutine, std::ref(src_file_paths[i]), std::ref(mut_tbls), std::ref(tblname2idx), std::ref(tables), std::ref(table_queues));
+        src_ths.emplace_back(std::move(th));
     }
 
-    SrcRoutine(fs_tmp_tbls, src_file_paths[0], mut_tbls, tblname2idx,tables);
+    // for (int i = 0; i < table_ths.size(); ++i) {
+    //     table_ths[i].join();
+    // }
+
+    for (int i = 0; i < src_file_paths.size(); ++i) {
+        src_ths[i].join();
+    }
+
 
     for (int i = 0; i < tables.size(); ++i) {
-        fs_tmp_tbls[i].close();
+        std::cout << "Processing table #" << i << " ..." << std::endl;
+        TableRoutine(table_queues[i], tables[i], mut_tbls[i], src_file_paths, output_dir);;
     }
-    // Load records from src files, verify and write to output files
-
-
-
-
-
-    // std::string str = "I\ttianchi_dts_data\torders\t5\t1\t1\t1517\t2021-04-11 15:41:55.0\t9\t6\t1";
-    // int pos = -1;
-    // int fields_len = 0;
-    // for (int i = 0; i < 14; ++i) {
-    //     fields_len = strcspn(str.c_str() + pos + 1, "\t");
-    //     pos += fields_len + 1;
-    //     std::cout << "pos=" << pos << " fields len=" << fields_len << std::endl;
-    // }
-    
-
-    // double a=12.4488123;
-    // char buf[32]={'\0'};
-    // sprintf(buf, "%*.*lf",1,2 ,a);
-    // printf("val=%s\n", buf);
-
-
-    // int fd = open("tmp.txt", O_RDONLY, 0);
-    // if (fd == -1) {
-    //     perror("File not found!");
-    //     return -1;
-    // }
-    // char *buf = static_cast<char*>(mmap64(NULL, 1, PROT_READ, MAP_PRIVATE|MAP_POPULATE, fd, 0));
-    // if (buf == MAP_FAILED) {
-    //     perror("Map file failed!");
-    //     return -1;
-    // }
-    // fprintf(stdout, "%s\n", buf);
-    // int str_len = strcspn(buf, "\n");
-    // printf("pos=%d\n", str_len);
-    // char *line = buf;
-    // printf("get line=%s\n", line);
-    // int old_pos = str_len + 1;
-
-    // for (int i = 0; i < 36; ++i) {
-    //     str_len = strcspn(buf + old_pos, "\n");
-    //     printf("pos=%d\n", str_len);
-    //     line = buf + old_pos;
-    //     printf("get line=%s\n", line);
-    //     old_pos += str_len + 1;
-    // }
     return 0;
 }
