@@ -39,14 +39,14 @@ struct column_t {
     int32_t precis_;
     // Only for decimal, otherwise -1
     int32_t scale_;
-} __attribute__ ((aligned(4)));
+};
 
 struct index_t {
     std::string name_;
     std::vector<int> index_cols_;
     bool primary_;
     bool unique_;
-} __attribute__  ((aligned(4)));
+};
 
 struct table_t {
     std::string db_name_;
@@ -55,12 +55,14 @@ struct table_t {
     std::vector<index_t> indexs_;
 
     std::unordered_map<std::string, int> name2col_;
-} __attribute__  ((aligned(4)));
+};
 
+#pragma pack(1)
 struct record_meta_t {
     int32_t file_no_;
     int64_t pos_;
-} __attribute__  ((aligned(4)));
+};
+#pragma pack()
 
 struct column_t ParseColumnMeta(std::string &table_meta_buf) {
     struct column_t col;
@@ -301,7 +303,7 @@ std::string CheckField(std::string &fld, const std::string &col_def) {
 // line_rec_meta[out_param]: the file no and position in source file of the line
 void LineVerify(char *line, std::unordered_map<std::string, int> &tblname2idx, int &tbl_idx, \
                         std::vector<struct table_t> &tbl_metas, int src_file_no, int64_t line_pos, \
-                        std::pair<std::string, struct record_meta_t> &line_rec_meta) {
+                        std::pair<uint64_t, struct record_meta_t> &line_rec_meta) {
     const int pk_field_setw = 12;
     std::vector<std::string> line_vec;
     int prev_pos = -1;
@@ -325,14 +327,29 @@ void LineVerify(char *line, std::unordered_map<std::string, int> &tblname2idx, i
             }
         }
     }
-    std::stringstream pk_str;
+    // std::stringstream pk_str;
+    // for (auto &idx : pk_col_idxs) {
+    //     pk_str << std::setw(pk_field_setw) << std::setfill('0') << line_vec[idx] << "|";
+    // }
+    int occupy_bitcnt = 0;
+    uint64_t pk = 0;
     for (auto &idx : pk_col_idxs) {
-        pk_str << std::setw(pk_field_setw) << std::setfill('0') << line_vec[idx] << "|";
+        uint64_t fld_val = std::stoul(line_vec[idx]);
+        if (tbl_meta.colunms_[idx].col_def_.find("tiny") != std::string::npos) {
+            pk |= fld_val << (64 - 8 - occupy_bitcnt);
+            occupy_bitcnt += 8;
+        } else if (tbl_meta.colunms_[idx].col_def_.find("small") != std::string::npos) {
+            pk |= fld_val << (64 - 16 - occupy_bitcnt);
+            occupy_bitcnt += 16;
+        } else {
+            pk |= fld_val << (64 - 32 - occupy_bitcnt);
+            occupy_bitcnt += 32;
+        }
     }
     struct record_meta_t line_info;
     line_info.file_no_ = src_file_no;
     line_info.pos_ = line_pos;
-    line_rec_meta = std::make_pair(pk_str.str(), std::move(line_info));
+    line_rec_meta = std::make_pair(pk, std::move(line_info));
 }
 
 void SrcRoutine(std::string &src_file_path, \
@@ -348,7 +365,7 @@ void SrcRoutine(std::string &src_file_path, \
         bzero(buf, buf_size);
         fs.getline(buf, buf_size);
         int tbl_idx = 0;
-        std::pair<std::string, struct record_meta_t> line_info;
+        std::pair<uint64_t, struct record_meta_t> line_info;
         LineVerify(buf, tblname2idx, tbl_idx, tbl_metas, src_file_no, line_pos, line_info);
         // Send to target table thread by queue
         mut_tbls[tbl_idx].lock();
@@ -362,25 +379,25 @@ void SrcRoutine(std::string &src_file_path, \
 
 void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
                     std::vector<std::fstream> &fs_vec,const std::string &output_dir) {
-    std::map<std::string, struct record_meta_t> pk2lineinfo;
+    std::map<uint64_t, struct record_meta_t> pk2lineinfo;
     const int buf_size = 1024;
     char *buf = new char[buf_size];
     bzero(buf, buf_size);
     std::cout << "Loading meta line records ..." << std::endl;
     // Load from tmp_fs file
     tmp_fs.seekg(0, tmp_fs.beg);
-    std::string pk;
+    uint64_t pk;
     struct record_meta_t rec_meta;
     while (!tmp_fs.eof()) {
         tmp_fs >> pk >> rec_meta.file_no_ >> rec_meta.pos_;
         if (pk2lineinfo.find(pk) == pk2lineinfo.end()) {
-            pk2lineinfo.emplace(std::make_pair(pk, rec_meta));
+            pk2lineinfo.emplace(pk, rec_meta);
         } else {
             auto&& old_ele = pk2lineinfo.at(pk);
             if (rec_meta.file_no_ > old_ele.file_no_ || \
                 (rec_meta.file_no_ == old_ele.file_no_ && rec_meta.pos_ > old_ele.pos_)) {
                 pk2lineinfo.erase(pk);
-                pk2lineinfo.emplace(std::make_pair(pk, rec_meta));
+                pk2lineinfo.emplace(pk, rec_meta);
             }
         }
     }
@@ -392,7 +409,7 @@ void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
     out_fs.open(output_dir+"/"+table_name, std::fstream::out);
     int rec_count = pk2lineinfo.size();
     std::cout << "Loading finish." << std::endl;
-    auto result_io_routine = [&fs_vec, buf, buf_size, &meta, &out_fs](std::pair<const std::string, record_meta_t> &ele)->void {
+    auto result_io_routine = [&fs_vec, buf, buf_size, &meta, &out_fs](std::pair<const uint64_t, record_meta_t> &ele)->void {
         // Load from src file
         fs_vec[ele.second.file_no_].seekg(ele.second.pos_);
         bzero(buf, buf_size);
