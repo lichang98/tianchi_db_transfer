@@ -25,7 +25,6 @@
 #include <unordered_set>
 #include <chrono>
 #include <iomanip>
-#include <future>
 
 
 struct column_t {
@@ -363,7 +362,7 @@ void SrcRoutine(std::string &src_file_path, \
 
 void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
                     std::vector<std::fstream> &fs_vec,const std::string &output_dir) {
-    std::unordered_map<std::string, struct record_meta_t> pk2lineinfo;
+    std::map<std::string, struct record_meta_t> pk2lineinfo;
     const int buf_size = 1024;
     char *buf = new char[buf_size];
     bzero(buf, buf_size);
@@ -392,18 +391,8 @@ void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
     std::fstream out_fs;
     out_fs.open(output_dir+"/"+table_name, std::fstream::out);
     int rec_count = pk2lineinfo.size();
-    std::vector<std::pair<std::string, struct record_meta_t>> line_info_vec;
-    for (auto &ele : pk2lineinfo) {
-        line_info_vec.emplace_back(std::move(ele));
-    }
-    std::cout << "Sorting ..." << std::endl;
-    std::sort(line_info_vec.begin(), line_info_vec.end(),[](const std::pair<std::string, struct record_meta_t> &a,\
-                const std::pair<std::string, struct record_meta_t> &b)->bool{
-        return a.first < b.first;
-    });
-
-    std::cout << "Sorting finish." << std::endl;
-    auto result_io_routine = [&fs_vec, buf, buf_size, &meta, &out_fs](std::pair<std::string, record_meta_t> &ele)->void {
+    std::cout << "Loading finish." << std::endl;
+    auto result_io_routine = [&fs_vec, buf, buf_size, &meta, &out_fs](std::pair<const std::string, record_meta_t> &ele)->void {
         // Load from src file
         fs_vec[ele.second.file_no_].seekg(ele.second.pos_);
         bzero(buf, buf_size);
@@ -427,8 +416,8 @@ void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
         }
     };
     
-    std::cout << "Start write, line info vec size=" << line_info_vec.size() << std::endl;
-    for (auto &ele : line_info_vec) {
+    std::cout << "Start write, line info vec size=" << rec_count << std::endl;
+    for (auto &ele : pk2lineinfo) {
         result_io_routine(ele);
         if (__glibc_likely(--rec_count > 0)) {
             out_fs << "\n";
