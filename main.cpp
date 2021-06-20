@@ -25,6 +25,7 @@
 #include <unordered_set>
 #include <chrono>
 #include <iomanip>
+#include <future>
 
 
 struct column_t {
@@ -206,7 +207,6 @@ std::vector<std::string> GetSrcFiles(const std::string &input_dir) {
         return ord_a < ord_b;
     });
     return input_file_paths;
-
 }
 
 bool CheckDateTime(std::string &val) {
@@ -338,7 +338,7 @@ void LineVerify(char *line, std::unordered_map<std::string, int> &tblname2idx, i
 
 void SrcRoutine(std::string &src_file_path, \
             std::vector<std::mutex> &mut_tbls, std::unordered_map<std::string, int> &tblname2idx,\
-            std::vector<struct table_t> &tbl_metas, std::vector<std::queue<std::pair<std::string, struct record_meta_t>>> &table_queues) {
+            std::vector<struct table_t> &tbl_metas, std::vector<std::fstream> &table_tmp_files) {
     std::fstream fs;
     const int buf_size = 1024;
     int src_file_no = std::stoi(src_file_path.substr(src_file_path.find_last_of('_') + 1));
@@ -353,7 +353,7 @@ void SrcRoutine(std::string &src_file_path, \
         LineVerify(buf, tblname2idx, tbl_idx, tbl_metas, src_file_no, line_pos, line_info);
         // Send to target table thread by queue
         mut_tbls[tbl_idx].lock();
-        table_queues[tbl_idx].emplace(std::move(line_info));
+        table_tmp_files[tbl_idx] << line_info.first << "\t" << line_info.second.file_no_ << "\t" << line_info.second.pos_ << std::endl;
         mut_tbls[tbl_idx].unlock();
         line_pos = fs.tellg();
     }
@@ -361,32 +361,32 @@ void SrcRoutine(std::string &src_file_path, \
     delete[] buf;
 }
 
-void TableRoutine(std::queue<std::pair<std::string, struct record_meta_t>> &que, struct table_t &meta,\
-                    std::vector<std::string> &src_files_path,const std::string &output_dir) {
+void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
+                    std::vector<std::fstream> &fs_vec,const std::string &output_dir) {
     std::unordered_map<std::string, struct record_meta_t> pk2lineinfo;
     const int buf_size = 1024;
     char *buf = new char[buf_size];
     bzero(buf, buf_size);
-    while (!que.empty()) {
-        std::pair<std::string, struct record_meta_t> ele = std::move(que.front());
-        que.pop();
-        if (pk2lineinfo.find(ele.first) == pk2lineinfo.end()) { 
-            pk2lineinfo.emplace(std::move(ele));
+    std::cout << "Loading meta line records ..." << std::endl;
+    // Load from tmp_fs file
+    tmp_fs.seekg(0, tmp_fs.beg);
+    std::string pk;
+    struct record_meta_t rec_meta;
+    while (!tmp_fs.eof()) {
+        tmp_fs >> pk >> rec_meta.file_no_ >> rec_meta.pos_;
+        if (pk2lineinfo.find(pk) == pk2lineinfo.end()) {
+            pk2lineinfo.emplace(std::make_pair(pk, rec_meta));
         } else {
-            auto&& old_ele = pk2lineinfo.at(ele.first);
-            if (ele.second.file_no_ > old_ele.file_no_ ||\
-                (ele.second.file_no_ == old_ele.file_no_ && ele.second.pos_ > old_ele.pos_)) {
-                pk2lineinfo.erase(ele.first);
-                pk2lineinfo.emplace(std::move(ele));
+            auto&& old_ele = pk2lineinfo.at(pk);
+            if (rec_meta.file_no_ > old_ele.file_no_ || \
+                (rec_meta.file_no_ == old_ele.file_no_ && rec_meta.pos_ > old_ele.pos_)) {
+                pk2lineinfo.erase(pk);
+                pk2lineinfo.emplace(std::make_pair(pk, rec_meta));
             }
         }
     }
-    std::cout << "Opening source files ..." << std::endl;
-    std::vector<std::fstream> fs_vec(src_files_path.size() + 1);
-    for (int i = 1; i < fs_vec.size(); ++i) {
-        fs_vec[i].open(src_files_path[i - 1]);
-    }
-    std::cout << "Opening source files Finished." << std::endl;
+
+    tmp_fs.close();
     // Load from src file by lines records, verify and write to output file
     const std::string& table_name = meta.table_name_;
     std::fstream out_fs;
@@ -396,37 +396,10 @@ void TableRoutine(std::queue<std::pair<std::string, struct record_meta_t>> &que,
     for (auto &ele : pk2lineinfo) {
         line_info_vec.emplace_back(std::move(ele));
     }
-    // std::vector<int> table_pk_idxs;
-    // for (auto &col : meta.indexs_) {
-    //     if (col.primary_) {
-    //         for (auto &index_col_idx : col.index_cols_) {
-    //             table_pk_idxs.emplace_back(index_col_idx);
-    //         }
-    //     }
-    // }
     std::cout << "Sorting ..." << std::endl;
     std::sort(line_info_vec.begin(), line_info_vec.end(),[](const std::pair<std::string, struct record_meta_t> &a,\
                 const std::pair<std::string, struct record_meta_t> &b)->bool{
         return a.first < b.first;
-        // std::stringstream ss_a(a.first);
-        // std::stringstream ss_b(b.first);
-        // std::string field_a, field_b;
-        // int idx = 0;
-        // while (std::getline(ss_a, field_a, '|') && std::getline(ss_b, field_b, '|')) {
-        //     if (__glibc_likely(meta.colunms_[table_pk_idxs[idx]].col_def_.find("int") != std::string::npos)) {
-        //         int key1 = std::stoi(field_a);
-        //         int key2 = std::stoi(field_b);
-        //         if (key1 != key2) { return key1 < key2; }
-        //     } else if (meta.colunms_[table_pk_idxs[idx]].col_def_.find("char") != std::string::npos) {
-        //         if (field_a != field_b) { return field_a < field_b; }
-        //     } else {
-        //         double key1 = std::stod(field_a);
-        //         double key2 = std::stod(field_b);
-        //         if (key1 != key2) { return key1 < key2; }
-        //     }
-        //     idx++;
-        // }
-        // return false;
     });
 
     std::cout << "Sorting finish." << std::endl;
@@ -463,11 +436,6 @@ void TableRoutine(std::queue<std::pair<std::string, struct record_meta_t>> &que,
     }
 
     std::cout << "Write records finished." << std::endl;
-
-    for (int i = 1; i < fs_vec.size(); ++i) {
-        fs_vec[i].close();
-    }
-
     out_fs.close();
     delete[] buf;
 }
@@ -477,6 +445,8 @@ int main(int argc, char const *argv[]) {
     const std::string meta_file = std::string(argv[1]) + "/schema_info_dir/schema.info";
     const std::string src_dir = std::string(argv[1]) + "/source_file_dir";
     const std::string output_dir = std::string(argv[2]) + "/sink_file_dir";
+    // Directory for storing middle result from src threads
+    const std::string record_line_tmp_fdir = ".";
 
     std::vector<std::string>&& src_file_paths = GetSrcFiles(src_dir);
     std::vector<struct table_t>&& tables = LoadTableMeta(meta_file);
@@ -485,20 +455,39 @@ int main(int argc, char const *argv[]) {
         tblname2idx.insert(std::make_pair(tables[i].table_name_, i));
     }
     std::vector<std::mutex> mut_tbls(tables.size());
-    std::vector<std::queue<std::pair<std::string, struct record_meta_t>>> table_queues(tables.size());
+    std::vector<std::fstream> table_tmp_files(tables.size());
+    // Open table tmp files
+    for (int i = 0; i < tables.size(); ++i) {
+        table_tmp_files[i].open(record_line_tmp_fdir + "/tmp_" + tables[i].table_name_, std::fstream::out);
+    }
 
     std::vector<std::thread> src_ths;
     for (int i = 0; i < src_file_paths.size(); ++i) {
-        std::thread th(SrcRoutine, std::ref(src_file_paths[i]), std::ref(mut_tbls), std::ref(tblname2idx), std::ref(tables), std::ref(table_queues));
+        std::thread th(SrcRoutine, std::ref(src_file_paths[i]), std::ref(mut_tbls), std::ref(tblname2idx), std::ref(tables), std::ref(table_tmp_files));
         src_ths.emplace_back(std::move(th));
     }
     for (int i = 0; i < src_file_paths.size(); ++i) {
         src_ths[i].join();
     }
 
+    std::vector<std::fstream> fs_vec(src_file_paths.size() + 1);
+    // Open infstream of source files
+    for (int i = 1; i < fs_vec.size(); ++i) {
+        fs_vec[i].open(src_file_paths[i - 1], std::fstream::in);
+    }
+    for (auto &tmpf : table_tmp_files) {
+        tmpf.close();
+    }
+    // Open table tmp files
+    for (int i = 0; i < tables.size(); ++i) {
+        table_tmp_files[i].open(record_line_tmp_fdir + "/tmp_" + tables[i].table_name_, std::fstream::in);
+    }
     for (int i = 0; i < tables.size(); ++i) {
         std::cout << "Processing table #" << i << " ..." << std::endl;
-        TableRoutine(table_queues[i], tables[i],src_file_paths, output_dir);;
+        TableRoutine(table_tmp_files[i], tables[i], fs_vec, output_dir);;
+    }
+    for (int i = 1; i < fs_vec.size(); ++i) {
+        fs_vec[i].close();
     }
     return 0;
 }
