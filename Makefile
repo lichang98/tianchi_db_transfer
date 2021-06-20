@@ -1,5 +1,5 @@
 main: main.cpp
-	g++ main.cpp -std=c++14 -o main -g -lpthread
+	g++ main.cpp -std=c++14 -o main -O3 -lpthread
 
 .PHONY: clean
 clean:

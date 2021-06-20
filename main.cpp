@@ -24,6 +24,7 @@
 #include <mutex>
 #include <unordered_set>
 #include <chrono>
+#include <iomanip>
 
 
 struct column_t {
@@ -38,14 +39,14 @@ struct column_t {
     int32_t precis_;
     // Only for decimal, otherwise -1
     int32_t scale_;
-} __attribute__ ((aligned(64)));
+} __attribute__ ((aligned(4)));
 
 struct index_t {
     std::string name_;
     std::vector<int> index_cols_;
     bool primary_;
     bool unique_;
-} __attribute__  ((aligned(64)));
+} __attribute__  ((aligned(4)));
 
 struct table_t {
     std::string db_name_;
@@ -54,12 +55,12 @@ struct table_t {
     std::vector<index_t> indexs_;
 
     std::unordered_map<std::string, int> name2col_;
-} __attribute__  ((aligned(64)));
+} __attribute__  ((aligned(4)));
 
 struct record_meta_t {
     int32_t file_no_;
     int64_t pos_;
-} __attribute__  ((aligned(64)));
+} __attribute__  ((aligned(4)));
 
 struct column_t ParseColumnMeta(std::string &table_meta_buf) {
     struct column_t col;
@@ -302,6 +303,7 @@ std::string CheckField(std::string &fld, const std::string &col_def) {
 void LineVerify(char *line, std::unordered_map<std::string, int> &tblname2idx, int &tbl_idx, \
                         std::vector<struct table_t> &tbl_metas, int src_file_no, int64_t line_pos, \
                         std::pair<std::string, struct record_meta_t> &line_rec_meta) {
+    const int pk_field_setw = 12;
     std::vector<std::string> line_vec;
     int prev_pos = -1;
     int fld_len = 0;
@@ -326,7 +328,7 @@ void LineVerify(char *line, std::unordered_map<std::string, int> &tblname2idx, i
     }
     std::stringstream pk_str;
     for (auto &idx : pk_col_idxs) {
-        pk_str << line_vec[idx] << "|";
+        pk_str << std::setw(pk_field_setw) << std::setfill('0') << line_vec[idx] << "|";
     }
     struct record_meta_t line_info;
     line_info.file_no_ = src_file_no;
@@ -369,12 +371,13 @@ void TableRoutine(std::queue<std::pair<std::string, struct record_meta_t>> &que,
         std::pair<std::string, struct record_meta_t> ele = std::move(que.front());
         que.pop();
         if (pk2lineinfo.find(ele.first) == pk2lineinfo.end()) { 
-            pk2lineinfo.insert(std::move(ele)); 
+            pk2lineinfo.emplace(std::move(ele));
         } else {
             auto&& old_ele = pk2lineinfo.at(ele.first);
             if (ele.second.file_no_ > old_ele.file_no_ ||\
                 (ele.second.file_no_ == old_ele.file_no_ && ele.second.pos_ > old_ele.pos_)) {
-                pk2lineinfo[ele.first] = ele.second;
+                pk2lineinfo.erase(ele.first);
+                pk2lineinfo.emplace(std::move(ele));
             }
         }
     }
@@ -393,36 +396,37 @@ void TableRoutine(std::queue<std::pair<std::string, struct record_meta_t>> &que,
     for (auto &ele : pk2lineinfo) {
         line_info_vec.emplace_back(std::move(ele));
     }
-    std::vector<int> table_pk_idxs;
-    for (auto &col : meta.indexs_) {
-        if (col.primary_) {
-            for (auto &index_col_idx : col.index_cols_) {
-                table_pk_idxs.emplace_back(index_col_idx);
-            }
-        }
-    }
+    // std::vector<int> table_pk_idxs;
+    // for (auto &col : meta.indexs_) {
+    //     if (col.primary_) {
+    //         for (auto &index_col_idx : col.index_cols_) {
+    //             table_pk_idxs.emplace_back(index_col_idx);
+    //         }
+    //     }
+    // }
     std::cout << "Sorting ..." << std::endl;
-    std::sort(line_info_vec.begin(), line_info_vec.end(),[&meta, &table_pk_idxs](const std::pair<std::string, struct record_meta_t> &a,\
+    std::sort(line_info_vec.begin(), line_info_vec.end(),[](const std::pair<std::string, struct record_meta_t> &a,\
                 const std::pair<std::string, struct record_meta_t> &b)->bool{
-        std::stringstream ss_a(a.first);
-        std::stringstream ss_b(b.first);
-        std::string field_a, field_b;
-        int idx = 0;
-        while (std::getline(ss_a, field_a, '|') && std::getline(ss_b, field_b, '|')) {
-            if (__glibc_likely(meta.colunms_[table_pk_idxs[idx]].col_def_.find("int") != std::string::npos)) {
-                int key1 = std::stoi(field_a);
-                int key2 = std::stoi(field_b);
-                if (key1 != key2) { return key1 < key2; }
-            } else if (meta.colunms_[table_pk_idxs[idx]].col_def_.find("char") != std::string::npos) {
-                if (field_a != field_b) { return field_a < field_b; }
-            } else {
-                double key1 = std::stod(field_a);
-                double key2 = std::stod(field_b);
-                if (key1 != key2) { return key1 < key2; }
-            }
-            idx++;
-        }
-        return false;
+        return a.first < b.first;
+        // std::stringstream ss_a(a.first);
+        // std::stringstream ss_b(b.first);
+        // std::string field_a, field_b;
+        // int idx = 0;
+        // while (std::getline(ss_a, field_a, '|') && std::getline(ss_b, field_b, '|')) {
+        //     if (__glibc_likely(meta.colunms_[table_pk_idxs[idx]].col_def_.find("int") != std::string::npos)) {
+        //         int key1 = std::stoi(field_a);
+        //         int key2 = std::stoi(field_b);
+        //         if (key1 != key2) { return key1 < key2; }
+        //     } else if (meta.colunms_[table_pk_idxs[idx]].col_def_.find("char") != std::string::npos) {
+        //         if (field_a != field_b) { return field_a < field_b; }
+        //     } else {
+        //         double key1 = std::stod(field_a);
+        //         double key2 = std::stod(field_b);
+        //         if (key1 != key2) { return key1 < key2; }
+        //     }
+        //     idx++;
+        // }
+        // return false;
     });
 
     std::cout << "Sorting finish." << std::endl;
