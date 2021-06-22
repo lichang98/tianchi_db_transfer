@@ -242,7 +242,7 @@ bool CheckInt(std::string &val) {
 
 bool CheckDecimal(std::string &val) {
     if (val[0] != '-' && !isdigit(val[0])) { return false; }
-    int i = val[0] == '-';
+    int i = val[0] == '-' ? 1 : 0;
     int dot_pos = val.find_first_of('.');
     if (dot_pos == std::string::npos) {
         while (i < val.size()) {
@@ -274,9 +274,7 @@ std::string CheckField(std::string &fld, const std::string &col_def) {
 			fld = std::move(fld.substr(0, n));
 		}
 		return fld;
-    } else if (col_def.find("text") != std::string::npos) {
-        return fld;
-    } else {
+    } else if (col_def.find("decimal") != std::string::npos){
         if (!CheckDecimal(fld)) { return "0"; }
 		int dot_idx = col_def.find(',', 0);
 		int right_brac_idx = col_def.find(')', 0);
@@ -288,6 +286,8 @@ std::string CheckField(std::string &fld, const std::string &col_def) {
             sprintf(val, "%.*lf", n, std::stod(fld) + 1e-10);
         }
         return std::string(val);
+    } else {
+        return std::move(fld);
     }
 }
 

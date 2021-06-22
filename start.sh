@@ -21,6 +21,7 @@ case $3 in
 esac
 
 mkdir ${out_dir}"/sink_file_dir"
-./main ${in_dir} ${out_dir}
+nohup ./main ${in_dir} ${out_dir} > nohup.out 2>&1
+cat nohup.out
 echo "end"
 exit 0
