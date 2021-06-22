@@ -211,22 +211,28 @@ std::vector<std::string> GetSrcFiles(const std::string &input_dir) {
 }
 
 bool CheckDateTime(std::string &val) {
-    if (val.size() > 21) { return false; }
+    if (val.size() > 26) { return false; }
     if (!isdigit(val[0]) || !isdigit(val[1]) || !isdigit(val[2]) || !isdigit(val[3]) \
         ||!isdigit(val[5]) || !isdigit(val[6]) || !isdigit(val[8]) || !isdigit(val[9])\
         || !isdigit(val[11]) || !isdigit(val[12]) || !isdigit(val[14]) || !isdigit(val[15])\
-        || !isdigit(val[17]) || !isdigit(val[18]) || !isdigit(val[20])) {
+        || !isdigit(val[17]) || !isdigit(val[18])) {
             return false;
     }
     if (val[4] != '-' || val[7] != '-') { return false; }
-    if (val[10] != ' ' || val[13] != ':' || val[16] != ':' || val[19] != '.') { return false; }
+    if (val[10] != ' ' || val[13] != ':' || val[16] != ':') { return false; }
+    if (val.size() > 19) {
+        if (val[19] != '.') { return false; }
+        for (int i = val.size() - 1; i >= 20; --i) {
+            if (!isdigit(val[i])) { return false; }
+        }
+    }
+
     return true;
 }
 
 bool CheckInt(std::string &val) {
     if (val[0] != '-' && !isdigit(val[0])) { return false; }
-    int i = 1;
-    for (; i < val.size(); ++i) {
+    for (int i = 1; i < val.size(); ++i) {
         if (!isdigit(val[i])) {
             return false;
         }
@@ -235,38 +241,32 @@ bool CheckInt(std::string &val) {
 }
 
 bool CheckDecimal(std::string &val) {
-    int dot_pos = val.find_first_of('.');
-    if (dot_pos == val.npos) {
-        return false;
-    }
-    int val_size = val.size();
     if (val[0] != '-' && !isdigit(val[0])) { return false; }
-    int i = 1;
-    for (; i < dot_pos; ++i) {
-        if (!isdigit(val[i])) { return false; }
-    }
-    for (i = dot_pos + 1; i < val_size; ++i) {
-        if (!isdigit(val[i])) { return false; }
+    int i = val[0] == '-';
+    int dot_pos = val.find_first_of('.');
+    if (dot_pos == std::string::npos) {
+        while (i < val.size()) {
+            if (!isdigit(val[i++])) { return false; }
+        }
+    } else {
+        while (i < dot_pos) {
+            if (!isdigit(val[i++])) { return false; }
+        }
+        while (++i < val.size()) {
+            if (!isdigit(val[i])) { return false; }
+        }
     }
     return true;
 }
 
 std::string CheckField(std::string &fld, const std::string &col_def) {
-    if (col_def.find("datetime") != col_def.npos) {
+    if (col_def.find("datetime") != std::string::npos) {
         if (CheckDateTime(fld)) { return fld; }
 		return "2020-04-01 00:00:00.0";
-    } else if (col_def.find("int") != col_def.npos) {
-        if (!CheckInt(fld)) {
-			return "0";
-		}
-		int idx = 0;
-		idx = col_def.find('(', idx) + 1;
-		int n = std::stoi(col_def.substr(idx, col_def.size() - idx - 1));
-		if (fld.size() > n) {
-			fld = std::move(fld.substr(fld.size() - n));
-		}
-		return fld;
-    } else if (col_def.find("char") != col_def.npos) {
+    } else if (col_def.find("int") != std::string::npos) {
+        if (!CheckInt(fld)) { return "0"; }
+		return std::move(fld);
+    } else if (col_def.find("char") != std::string::npos) {
 		int idx = 0;
 		idx = col_def.find('(', idx) + 1;
 		int n = std::stoi(col_def.substr(idx, col_def.size() - idx - 1));
@@ -274,12 +274,10 @@ std::string CheckField(std::string &fld, const std::string &col_def) {
 			fld = std::move(fld.substr(0, n));
 		}
 		return fld;
-    } else if (col_def.find("text") != col_def.npos) {
+    } else if (col_def.find("text") != std::string::npos) {
         return fld;
     } else {
-        if (!CheckDecimal(fld)) {
-			return "0";
-		}
+        if (!CheckDecimal(fld)) { return "0"; }
 		int dot_idx = col_def.find(',', 0);
 		int right_brac_idx = col_def.find(')', 0);
 		int n = std::stoi(col_def.substr(dot_idx + 1, right_brac_idx - dot_idx - 1));
