@@ -57,12 +57,10 @@ struct table_t {
     std::unordered_map<std::string, int> name2col_;
 };
 
-#pragma pack(1)
 struct record_meta_t {
-    int32_t file_no_;
     int64_t pos_;
+    int32_t file_no_;
 };
-#pragma pack()
 
 struct column_t ParseColumnMeta(std::string &table_meta_buf) {
     struct column_t col;
@@ -108,7 +106,7 @@ struct index_t ParseIndexMeta(std::string &index_meta_buf, table_t &table_meta) 
     for (int i = 0; i < index_col_size; ++i) {
         index.index_cols_.emplace_back(table_meta.name2col_.at(col_arr[i].GetString()));
     }
-    return index;
+    return std::move(index);
 }
 
 struct table_t ParseTable(const std::string &multi_line) {
@@ -144,7 +142,7 @@ struct table_t ParseTable(const std::string &multi_line) {
         struct index_t&& index = ParseIndexMeta(str, table);
         table.indexs_.emplace_back(index);
     }
-    return table;
+    return std::move(table);
 }
 
 std::vector<struct table_t> LoadTableMeta(const std::string &meta_file) {
@@ -173,7 +171,7 @@ std::vector<struct table_t> LoadTableMeta(const std::string &meta_file) {
 
     fs.close();
     delete[] line;
-    return tables;
+    return std::move(tables);
 }
 
 void show_table_meta(struct table_t &tbl) {
@@ -262,7 +260,7 @@ bool CheckDecimal(std::string &val) {
 std::string CheckField(std::string &fld, const std::string &col_def) {
     if (col_def.find("datetime") != std::string::npos) {
         if (CheckDateTime(fld)) { return fld; }
-		return "2020-04-01 00:00:00.0";
+		return std::move("2020-04-01 00:00:00.0");
     } else if (col_def.find("int") != std::string::npos) {
         if (!CheckInt(fld)) { return "0"; }
 		return std::move(fld);
@@ -273,7 +271,7 @@ std::string CheckField(std::string &fld, const std::string &col_def) {
 		if (fld.size() > n) {
 			fld = std::move(fld.substr(0, n));
 		}
-		return fld;
+		return std::move(fld);
     } else if (col_def.find("decimal") != std::string::npos){
         if (!CheckDecimal(fld)) { return "0"; }
 		int dot_idx = col_def.find(',', 0);
@@ -285,7 +283,7 @@ std::string CheckField(std::string &fld, const std::string &col_def) {
         } else {
             sprintf(val, "%.*lf", n, std::stod(fld) + 1e-10);
         }
-        return std::string(val);
+        return std::move(std::string(val));
     } else {
         return std::move(fld);
     }
@@ -302,7 +300,7 @@ std::string CheckField(std::string &fld, const std::string &col_def) {
 void LineVerify(char *line, std::unordered_map<std::string, int> &tblname2idx, int &tbl_idx, \
                         std::vector<struct table_t> &tbl_metas, int src_file_no, int64_t line_pos, \
                         std::pair<uint64_t, struct record_meta_t> &line_rec_meta) {
-    const int pk_field_setw = 12;
+    // const int pk_field_setw = 12;
     std::vector<std::string> line_vec;
     int prev_pos = -1;
     int fld_len = 0;
@@ -404,7 +402,7 @@ void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
     // Load from src file by lines records, verify and write to output file
     const std::string& table_name = meta.table_name_;
     std::fstream out_fs;
-    out_fs.open(output_dir+"/"+table_name, std::fstream::out);
+    out_fs.open(output_dir+"/tianchi_dts_sink_data_"+table_name, std::fstream::out);
     int rec_count = pk2lineinfo.size();
     std::cout << "Loading finish." << std::endl;
     auto result_io_routine = [&fs_vec, buf, buf_size, &meta, &out_fs](std::pair<const uint64_t, record_meta_t> &ele)->void {
@@ -450,7 +448,7 @@ int main(int argc, char const *argv[]) {
     const std::string src_dir = std::string(argv[1]) + "/source_file_dir";
     const std::string output_dir = std::string(argv[2]) + "/sink_file_dir";
     // Directory for storing middle result from src threads
-    const std::string record_line_tmp_fdir = ".";
+    const std::string record_line_tmp_fdir = std::string(argv[2]);
 
     std::vector<std::string>&& src_file_paths = GetSrcFiles(src_dir);
     std::vector<struct table_t>&& tables = LoadTableMeta(meta_file);
@@ -474,6 +472,8 @@ int main(int argc, char const *argv[]) {
         src_ths[i].join();
     }
 
+    time_t tm_stmp = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::cout << "All src thread routine finish, tm=" << std::ctime(&tm_stmp) << std::endl;
     std::vector<std::fstream> fs_vec(src_file_paths.size() + 1);
     // Open infstream of source files
     for (int i = 1; i < fs_vec.size(); ++i) {
