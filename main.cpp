@@ -357,6 +357,7 @@ void SrcRoutine(std::string &src_file_path, \
     char *buf = new char[buf_size];
     fs.open(src_file_path, std::fstream::in);
     int64_t line_pos = 0;
+    char buf_line_info[24];
     while (!fs.eof()) {
         bzero(buf, buf_size);
         fs.getline(buf, buf_size);
@@ -364,8 +365,13 @@ void SrcRoutine(std::string &src_file_path, \
         std::pair<uint64_t, struct record_meta_t> line_info;
         LineVerify(buf, tblname2idx, tbl_idx, tbl_metas, src_file_no, line_pos, line_info);
         // Send to target table thread by queue
+        bzero(buf_line_info, 24);
+        *((uint64_t*)(buf_line_info)) = line_info.first;
+        *((uint64_t*)(buf_line_info + 8)) = line_info.second.file_no_;
+        *((uint64_t*)(buf_line_info + 16)) = line_info.second.pos_;
         mut_tbls[tbl_idx].lock();
-        table_tmp_files[tbl_idx] << line_info.first << "\t" << line_info.second.file_no_ << "\t" << line_info.second.pos_ << std::endl;
+        table_tmp_files[tbl_idx].write(buf_line_info, 24);
+        // table_tmp_files[tbl_idx] << line_info.first << "\t" << line_info.second.file_no_ << "\t" << line_info.second.pos_ << std::endl;
         mut_tbls[tbl_idx].unlock();
         line_pos = fs.tellg();
     }
@@ -384,8 +390,16 @@ void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
     tmp_fs.seekg(0, tmp_fs.beg);
     uint64_t pk;
     struct record_meta_t rec_meta;
+    char buf_rec_meta[24];
     while (!tmp_fs.eof()) {
-        tmp_fs >> pk >> rec_meta.file_no_ >> rec_meta.pos_;
+        bzero(buf_rec_meta, 24);
+        tmp_fs.read(buf_rec_meta, 24);
+        pk = *((uint64_t*)(buf_rec_meta));
+        rec_meta.file_no_ = *((uint64_t*)(buf_rec_meta + 8));
+        rec_meta.pos_ = *((uint64_t*)(buf_rec_meta + 16));
+        // tmp_fs >> pk >> rec_meta.file_no_ >> rec_meta.pos_;
+        // Using invalid file_no value (file_no == 0) check read end of line
+        if (rec_meta.file_no_ == 0) { continue; }
         if (pk2lineinfo.find(pk) == pk2lineinfo.end()) {
             pk2lineinfo.emplace(pk, rec_meta);
         } else {
@@ -460,7 +474,7 @@ int main(int argc, char const *argv[]) {
     std::vector<std::fstream> table_tmp_files(tables.size());
     // Open table tmp files
     for (int i = 0; i < tables.size(); ++i) {
-        table_tmp_files[i].open(record_line_tmp_fdir + "/tmp_" + tables[i].table_name_, std::fstream::out);
+        table_tmp_files[i].open(record_line_tmp_fdir + "/tmp_" + tables[i].table_name_, std::fstream::out | std::fstream::binary);
     }
 
     std::vector<std::thread> src_ths;
@@ -484,7 +498,7 @@ int main(int argc, char const *argv[]) {
     }
     // Open table tmp files
     for (int i = 0; i < tables.size(); ++i) {
-        table_tmp_files[i].open(record_line_tmp_fdir + "/tmp_" + tables[i].table_name_, std::fstream::in);
+        table_tmp_files[i].open(record_line_tmp_fdir + "/tmp_" + tables[i].table_name_, std::fstream::in | std::fstream::binary);
     }
     for (int i = 0; i < tables.size(); ++i) {
         std::cout << "Processing table #" << i << " ..." << std::endl;
