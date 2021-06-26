@@ -383,14 +383,12 @@ void SrcRoutine(std::string &src_file_path, \
 }
 
 void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
-                    std::vector<std::fstream> &fs_vec,const std::string &output_dir) {
+                    std::vector<std::fstream> &fs_vec,const std::string &output_dir, std::vector<std::mutex> &mut_src_rds) {
     std::map<uint64_t, struct record_meta_t> pk2lineinfo;
     const int buf_size = 1024;
     const int rd_buf_size = 8192;
-    char *buf = new char[buf_size];
     char rd_buf[rd_buf_size];
     tmp_fs.rdbuf()->pubsetbuf(rd_buf, rd_buf_size);
-    bzero(buf, buf_size);
     std::cout << "Loading meta line records ..." << std::endl;
     // Load from tmp_fs file
     tmp_fs.seekg(0, tmp_fs.beg);
@@ -430,11 +428,14 @@ void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
     // out_fs.rdbuf()->pubsetbuf(out_rd_buf, out_fs_rd_buf_size);
     int rec_count = pk2lineinfo.size();
     std::cout << "Loading finish." << std::endl;
-    auto result_io_routine = [&fs_vec, buf, buf_size, &meta, &out_fs, out_buf, out_buf_size](std::pair<const uint64_t, record_meta_t> &ele)->void {
+    auto result_io_routine = [&fs_vec, buf_size, &meta, &out_fs, out_buf, out_buf_size, &mut_src_rds](std::pair<const uint64_t, record_meta_t> &ele)->void {
         // Load from src file
-        fs_vec[ele.second.file_no_].seekg(ele.second.pos_);
+        char buf[buf_size];
         bzero(buf, buf_size);
+        mut_src_rds[ele.second.file_no_].lock();
+        fs_vec[ele.second.file_no_].seekg(ele.second.pos_);
         fs_vec[ele.second.file_no_].getline(buf, buf_size);
+        mut_src_rds[ele.second.file_no_].unlock();
         std::vector<std::string> line_vec;
         int prev_pos = -1;
         int fld_len = 0;
@@ -477,10 +478,8 @@ void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
             out_fs.write("\n", 1);
         }
     }
-
     std::cout << "Write records finished." << std::endl;
     out_fs.close();
-    delete[] buf;
 }
 
 
@@ -496,6 +495,8 @@ int main(int argc, char const *argv[]) {
     std::vector<std::string>&& src_file_paths = GetSrcFiles(src_dir);
     std::vector<struct table_t>&& tables = LoadTableMeta(meta_file);
     std::unordered_map<std::string, int> tblname2idx;
+    // File no start from 1
+    std::vector<std::mutex> mut_src_rds(src_file_paths.size() + 1);
     for (int i = 0; i < tables.size(); ++i) {
         tblname2idx.insert(std::make_pair(tables[i].table_name_, i));
     }
@@ -529,9 +530,16 @@ int main(int argc, char const *argv[]) {
     for (int i = 0; i < tables.size(); ++i) {
         table_tmp_files[i].open(record_line_tmp_fdir + "/tmp_" + tables[i].table_name_, std::fstream::in | std::fstream::binary);
     }
+    std::vector<std::thread> tbl_handle_ths;
     for (int i = 0; i < tables.size(); ++i) {
         std::cout << "Processing table #" << i << " ..." << std::endl;
-        TableRoutine(table_tmp_files[i], tables[i], fs_vec, output_dir);;
+        std::thread tbl_th(TableRoutine, std::ref(table_tmp_files[i]), std::ref(tables[i]), std::ref(fs_vec), \
+                            std::ref(output_dir), std::ref(mut_src_rds));
+        tbl_handle_ths.emplace_back(std::move(tbl_th));
+        // TableRoutine(table_tmp_files[i], tables[i], fs_vec, output_dir, std::ref(mut_src_rds));;
+    }
+    for (int i = 0; i < tbl_handle_ths.size(); ++i) {
+        tbl_handle_ths[i].join();
     }
     for (int i = 1; i < fs_vec.size(); ++i) {
         fs_vec[i].close();
