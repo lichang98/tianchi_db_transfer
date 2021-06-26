@@ -353,9 +353,12 @@ void SrcRoutine(std::string &src_file_path, \
             std::vector<struct table_t> &tbl_metas, std::vector<std::fstream> &table_tmp_files) {
     std::fstream fs;
     const int buf_size = 1024;
+    const int fs_in_rdbuf_size = 8192;
     int src_file_no = std::stoi(src_file_path.substr(src_file_path.find_last_of('_') + 1));
     char *buf = new char[buf_size];
+    char fs_in_rdbuf[fs_in_rdbuf_size];
     fs.open(src_file_path, std::fstream::in);
+    fs.rdbuf()->pubsetbuf(fs_in_rdbuf, fs_in_rdbuf_size);
     int64_t line_pos = 0;
     char buf_line_info[24];
     while (!fs.eof()) {
@@ -383,7 +386,10 @@ void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
                     std::vector<std::fstream> &fs_vec,const std::string &output_dir) {
     std::map<uint64_t, struct record_meta_t> pk2lineinfo;
     const int buf_size = 1024;
+    const int rd_buf_size = 8192;
     char *buf = new char[buf_size];
+    char rd_buf[rd_buf_size];
+    tmp_fs.rdbuf()->pubsetbuf(rd_buf, rd_buf_size);
     bzero(buf, buf_size);
     std::cout << "Loading meta line records ..." << std::endl;
     // Load from tmp_fs file
@@ -415,11 +421,16 @@ void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
     tmp_fs.close();
     // Load from src file by lines records, verify and write to output file
     const std::string& table_name = meta.table_name_;
+    // const int out_fs_rd_buf_size = 16384;
+    // char out_rd_buf[out_fs_rd_buf_size];
+    const int out_buf_size = 8192;
+    char out_buf[out_buf_size];
     std::fstream out_fs;
     out_fs.open(output_dir+"/tianchi_dts_sink_data_"+table_name, std::fstream::out);
+    // out_fs.rdbuf()->pubsetbuf(out_rd_buf, out_fs_rd_buf_size);
     int rec_count = pk2lineinfo.size();
     std::cout << "Loading finish." << std::endl;
-    auto result_io_routine = [&fs_vec, buf, buf_size, &meta, &out_fs](std::pair<const uint64_t, record_meta_t> &ele)->void {
+    auto result_io_routine = [&fs_vec, buf, buf_size, &meta, &out_fs, out_buf, out_buf_size](std::pair<const uint64_t, record_meta_t> &ele)->void {
         // Load from src file
         fs_vec[ele.second.file_no_].seekg(ele.second.pos_);
         bzero(buf, buf_size);
@@ -436,18 +447,34 @@ void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
         line_vec.erase(line_vec.begin(), line_vec.begin() + 3);
         // Verify and write
         line_vec[0] = std::move(CheckField(line_vec[0], meta.colunms_[0].col_def_));
-        out_fs << line_vec[0];
+        bzero((void*)out_buf, out_buf_size);
+        int buf_end = 0, buf_ele_len = 0;
+        const char *tab_split = "\t";
+        buf_ele_len = line_vec[0].size();
+        memcpy((void*)out_buf, line_vec[0].c_str(), buf_ele_len);
+        buf_end += buf_ele_len;
         for (int i = 1; i < line_vec.size(); ++i) {
             line_vec[i] = std::move(CheckField(line_vec[i], meta.colunms_[i].col_def_));
-            out_fs << "\t" << line_vec[i];
+            memcpy((void*)(out_buf + buf_end), tab_split, 1);
+            ++buf_end;
+            buf_ele_len = line_vec[i].size();
+            memcpy((void*)(out_buf + buf_end), line_vec[i].c_str(), buf_ele_len);
+            buf_end += buf_ele_len;
         }
+        out_fs.write(out_buf, buf_end);
+        // out_fs << line_vec[0];
+        // for (int i = 1; i < line_vec.size(); ++i) {
+        //     line_vec[i] = std::move(CheckField(line_vec[i], meta.colunms_[i].col_def_));
+        //     out_fs << "\t" << line_vec[i];
+        // }
     };
     
     std::cout << "Start write, line info vec size=" << rec_count << std::endl;
     for (auto &ele : pk2lineinfo) {
         result_io_routine(ele);
         if (__glibc_likely(--rec_count > 0)) {
-            out_fs << "\n";
+            // out_fs << "\n";
+            out_fs.write("\n", 1);
         }
     }
 
@@ -458,6 +485,8 @@ void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
 
 
 int main(int argc, char const *argv[]) {
+    std::ios_base::sync_with_stdio(false);
+    std::cin.tie(nullptr);
     const std::string meta_file = std::string(argv[1]) + "/schema_info_dir/schema.info";
     const std::string src_dir = std::string(argv[1]) + "/source_file_dir";
     const std::string output_dir = std::string(argv[2]) + "/sink_file_dir";
