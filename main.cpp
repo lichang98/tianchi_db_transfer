@@ -323,10 +323,6 @@ void LineVerify(char *line, std::unordered_map<std::string, int> &tblname2idx, i
             }
         }
     }
-    // std::stringstream pk_str;
-    // for (auto &idx : pk_col_idxs) {
-    //     pk_str << std::setw(pk_field_setw) << std::setfill('0') << line_vec[idx] << "|";
-    // }
     int occupy_bitcnt = 0;
     uint64_t pk = 0;
     for (auto &idx : pk_col_idxs) {
@@ -374,7 +370,6 @@ void SrcRoutine(std::string &src_file_path, \
         *((uint64_t*)(buf_line_info + 16)) = line_info.second.pos_;
         mut_tbls[tbl_idx].lock();
         table_tmp_files[tbl_idx].write(buf_line_info, 24);
-        // table_tmp_files[tbl_idx] << line_info.first << "\t" << line_info.second.file_no_ << "\t" << line_info.second.pos_ << std::endl;
         mut_tbls[tbl_idx].unlock();
         line_pos = fs.tellg();
     }
@@ -382,28 +377,40 @@ void SrcRoutine(std::string &src_file_path, \
     delete[] buf;
 }
 
-void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
+void TableRoutine(std::string &tmp_fs, struct table_t &meta,\
                     std::vector<std::fstream> &fs_vec,const std::string &output_dir, std::vector<std::mutex> &mut_src_rds) {
     std::map<uint64_t, struct record_meta_t> pk2lineinfo;
     const int buf_size = 1024;
-    const int rd_buf_size = 8192;
-    char rd_buf[rd_buf_size];
-    tmp_fs.rdbuf()->pubsetbuf(rd_buf, rd_buf_size);
+    char *tmp_f_mmap_buf;
+    struct stat tmp_f_stat;
     std::cout << "Loading meta line records ..." << std::endl;
-    // Load from tmp_fs file
-    tmp_fs.seekg(0, tmp_fs.beg);
     uint64_t pk;
     struct record_meta_t rec_meta;
-    char buf_rec_meta[24];
-    while (!tmp_fs.eof()) {
-        bzero(buf_rec_meta, 24);
-        tmp_fs.read(buf_rec_meta, 24);
-        pk = *((uint64_t*)(buf_rec_meta));
-        rec_meta.file_no_ = *((uint64_t*)(buf_rec_meta + 8));
-        rec_meta.pos_ = *((uint64_t*)(buf_rec_meta + 16));
-        // tmp_fs >> pk >> rec_meta.file_no_ >> rec_meta.pos_;
+    const int file_offset_inc = 65536;
+    int file_offset = 0;
+    const int page_size = 4096;
+    int fs = open(tmp_fs.c_str(), O_RDONLY);
+    fstat(fs, &tmp_f_stat);
+    const int tmp_f_size = tmp_f_stat.st_size;
+    tmp_f_mmap_buf = (char*)mmap(nullptr, file_offset_inc, PROT_READ, MAP_PRIVATE|MAP_POPULATE, fs, file_offset);
+    int curr_pos = 0;
+    std::cout << "f size=" << tmp_f_size << std::endl;
+    while (curr_pos + file_offset < tmp_f_size) {
+        if (curr_pos + 24 > file_offset_inc) {
+            curr_pos = page_size - (file_offset_inc - curr_pos);
+            munmap(tmp_f_mmap_buf, file_offset_inc);
+            file_offset = file_offset + file_offset_inc - page_size;
+            tmp_f_mmap_buf = (char*)mmap(nullptr, file_offset_inc, PROT_READ, MAP_PRIVATE|MAP_POPULATE, fs, file_offset);
+            continue;
+        }
+        pk = *((uint64_t*)(tmp_f_mmap_buf + curr_pos));
+        curr_pos += 8;
+        rec_meta.file_no_ = *((uint64_t*)(tmp_f_mmap_buf + curr_pos));
+        curr_pos += 8;
+        rec_meta.pos_ = *((uint64_t*)(tmp_f_mmap_buf + curr_pos));
+        curr_pos += 8;
         // Using invalid file_no value (file_no == 0) check read end of line
-        if (rec_meta.file_no_ == 0) { continue; }
+        if (rec_meta.file_no_ == 0) { break; }
         if (pk2lineinfo.find(pk) == pk2lineinfo.end()) {
             pk2lineinfo.emplace(pk, rec_meta);
         } else {
@@ -415,17 +422,14 @@ void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
             }
         }
     }
-
-    tmp_fs.close();
+    munmap(tmp_f_mmap_buf, file_offset_inc);
+    close(fs);
     // Load from src file by lines records, verify and write to output file
     const std::string& table_name = meta.table_name_;
-    // const int out_fs_rd_buf_size = 16384;
-    // char out_rd_buf[out_fs_rd_buf_size];
     const int out_buf_size = 8192;
     char out_buf[out_buf_size];
     std::fstream out_fs;
     out_fs.open(output_dir+"/tianchi_dts_sink_data_"+table_name, std::fstream::out);
-    // out_fs.rdbuf()->pubsetbuf(out_rd_buf, out_fs_rd_buf_size);
     int rec_count = pk2lineinfo.size();
     std::cout << "Loading finish." << std::endl;
     auto result_io_routine = [&fs_vec, buf_size, &meta, &out_fs, out_buf, out_buf_size, &mut_src_rds](std::pair<const uint64_t, record_meta_t> &ele)->void {
@@ -463,18 +467,12 @@ void TableRoutine(std::fstream &tmp_fs, struct table_t &meta,\
             buf_end += buf_ele_len;
         }
         out_fs.write(out_buf, buf_end);
-        // out_fs << line_vec[0];
-        // for (int i = 1; i < line_vec.size(); ++i) {
-        //     line_vec[i] = std::move(CheckField(line_vec[i], meta.colunms_[i].col_def_));
-        //     out_fs << "\t" << line_vec[i];
-        // }
     };
     
     std::cout << "Start write, line info vec size=" << rec_count << std::endl;
     for (auto &ele : pk2lineinfo) {
         result_io_routine(ele);
         if (__glibc_likely(--rec_count > 0)) {
-            // out_fs << "\n";
             out_fs.write("\n", 1);
         }
     }
@@ -502,9 +500,11 @@ int main(int argc, char const *argv[]) {
     }
     std::vector<std::mutex> mut_tbls(tables.size());
     std::vector<std::fstream> table_tmp_files(tables.size());
+    std::vector<std::string> tmp_fnames;
     // Open table tmp files
     for (int i = 0; i < tables.size(); ++i) {
         table_tmp_files[i].open(record_line_tmp_fdir + "/tmp_" + tables[i].table_name_, std::fstream::out | std::fstream::binary);
+        tmp_fnames.emplace_back(record_line_tmp_fdir + "/tmp_" + tables[i].table_name_);
     }
 
     std::vector<std::thread> src_ths;
@@ -526,17 +526,13 @@ int main(int argc, char const *argv[]) {
     for (auto &tmpf : table_tmp_files) {
         tmpf.close();
     }
-    // Open table tmp files
-    for (int i = 0; i < tables.size(); ++i) {
-        table_tmp_files[i].open(record_line_tmp_fdir + "/tmp_" + tables[i].table_name_, std::fstream::in | std::fstream::binary);
-    }
     std::vector<std::thread> tbl_handle_ths;
     for (int i = 0; i < tables.size(); ++i) {
         std::cout << "Processing table #" << i << " ..." << std::endl;
-        std::thread tbl_th(TableRoutine, std::ref(table_tmp_files[i]), std::ref(tables[i]), std::ref(fs_vec), \
+        std::thread tbl_th(TableRoutine, std::ref(tmp_fnames[i]), std::ref(tables[i]), std::ref(fs_vec), \
                             std::ref(output_dir), std::ref(mut_src_rds));
         tbl_handle_ths.emplace_back(std::move(tbl_th));
-        // TableRoutine(table_tmp_files[i], tables[i], fs_vec, output_dir, std::ref(mut_src_rds));;
+        // TableRoutine(tmp_fnames[i], tables[i], fs_vec, output_dir, mut_src_rds);
     }
     for (int i = 0; i < tbl_handle_ths.size(); ++i) {
         tbl_handle_ths[i].join();
