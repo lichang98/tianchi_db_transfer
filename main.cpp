@@ -386,14 +386,14 @@ void TableRoutine(std::string &tmp_fs, struct table_t &meta,\
     std::cout << "Loading meta line records ..." << std::endl;
     uint64_t pk;
     struct record_meta_t rec_meta;
-    const int file_offset_inc = 65536;
-    int file_offset = 0;
-    const int page_size = 4096;
+    const uint64_t file_offset_inc = 1048576;
+    uint64_t file_offset = 0;
+    const uint64_t page_size = 4096;
     int fs = open(tmp_fs.c_str(), O_RDONLY);
     fstat(fs, &tmp_f_stat);
     const int tmp_f_size = tmp_f_stat.st_size;
     tmp_f_mmap_buf = (char*)mmap(nullptr, file_offset_inc, PROT_READ, MAP_PRIVATE|MAP_POPULATE, fs, file_offset);
-    int curr_pos = 0;
+    uint64_t curr_pos = 0;
     std::cout << "f size=" << tmp_f_size << std::endl;
     while (curr_pos + file_offset < tmp_f_size) {
         if (curr_pos + 24 > file_offset_inc) {
@@ -426,13 +426,11 @@ void TableRoutine(std::string &tmp_fs, struct table_t &meta,\
     close(fs);
     // Load from src file by lines records, verify and write to output file
     const std::string& table_name = meta.table_name_;
-    const int out_buf_size = 8192;
-    char out_buf[out_buf_size];
-    std::fstream out_fs;
-    out_fs.open(output_dir+"/tianchi_dts_sink_data_"+table_name, std::fstream::out);
     int rec_count = pk2lineinfo.size();
     std::cout << "Loading finish." << std::endl;
-    auto result_io_routine = [&fs_vec, buf_size, &meta, &out_fs, out_buf, out_buf_size, &mut_src_rds](std::pair<const uint64_t, record_meta_t> &ele)->void {
+    auto result_io_routine = [&fs_vec, buf_size, &meta, &mut_src_rds](std::pair<const uint64_t, record_meta_t> &ele, \
+                                char *&map_buf, uint64_t &curr_pos, uint64_t &offset, int fd_out,const uint64_t offset_inc, \
+                                const uint64_t page_size, bool need_new_line)->void {
         // Load from src file
         char buf[buf_size];
         bzero(buf, buf_size);
@@ -451,33 +449,39 @@ void TableRoutine(std::string &tmp_fs, struct table_t &meta,\
         } while (fld_len > 0);
         line_vec.erase(line_vec.begin(), line_vec.begin() + 3);
         // Verify and write
-        line_vec[0] = std::move(CheckField(line_vec[0], meta.colunms_[0].col_def_));
-        bzero((void*)out_buf, out_buf_size);
-        int buf_end = 0, buf_ele_len = 0;
-        const char *tab_split = "\t";
-        buf_ele_len = line_vec[0].size();
-        memcpy((void*)out_buf, line_vec[0].c_str(), buf_ele_len);
-        buf_end += buf_ele_len;
-        for (int i = 1; i < line_vec.size(); ++i) {
+        for (int i = 0; i < line_vec.size(); ++i) {
             line_vec[i] = std::move(CheckField(line_vec[i], meta.colunms_[i].col_def_));
-            memcpy((void*)(out_buf + buf_end), tab_split, 1);
-            ++buf_end;
-            buf_ele_len = line_vec[i].size();
-            memcpy((void*)(out_buf + buf_end), line_vec[i].c_str(), buf_ele_len);
-            buf_end += buf_ele_len;
+            if (curr_pos + line_vec[i].size() + 2 > offset_inc) {
+                munmap(map_buf, offset_inc);
+                curr_pos = page_size - (offset_inc - curr_pos);
+                offset = offset + offset_inc - page_size;
+                lseek(fd_out, offset_inc * 2, SEEK_END);
+                write(fd_out, "", 1);
+                map_buf = (char *)mmap(nullptr, offset_inc, PROT_WRITE|PROT_READ, MAP_SHARED, fd_out, offset);
+            }
+            if (i > 0) { map_buf[curr_pos++] = '\t'; }
+            memcpy(map_buf + curr_pos, line_vec[i].c_str(), line_vec[i].size());
+            curr_pos += line_vec[i].size();
         }
-        out_fs.write(out_buf, buf_end);
+        
+        if (need_new_line) { map_buf[curr_pos++] = '\n'; }
     };
-    
+
+    file_offset = 0;
+    curr_pos = 0;
+    int fd_out = open((output_dir+"/tianchi_dts_sink_data_"+table_name).c_str(), O_RDWR|O_CREAT|O_TRUNC, 00666);
+    lseek(fd_out, file_offset_inc * 2, SEEK_END);
+    write(fd_out, "", 1);
+    char *out_mmap_buf = (char*)mmap(nullptr, file_offset_inc, PROT_WRITE|PROT_READ, MAP_SHARED, fd_out, file_offset);
+        
     std::cout << "Start write, line info vec size=" << rec_count << std::endl;
     for (auto &ele : pk2lineinfo) {
-        result_io_routine(ele);
-        if (__glibc_likely(--rec_count > 0)) {
-            out_fs.write("\n", 1);
-        }
+        result_io_routine(ele, out_mmap_buf, curr_pos, file_offset, fd_out, file_offset_inc, page_size, (--rec_count > 0));
     }
+    ftruncate(fd_out, file_offset + curr_pos);
     std::cout << "Write records finished." << std::endl;
-    out_fs.close();
+    munmap(out_mmap_buf, file_offset_inc);
+    close(fd_out);
 }
 
 
