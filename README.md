@@ -1,5 +1,5 @@
 # tianchi_db_transfer
-Tianchi competition, transfer DB data
+Tianchi competition, transfer DB data [https://tianchi.aliyun.com/competition/entrance/531896/introduction](https://tianchi.aliyun.com/competition/entrance/531896/introduction)
 
 The master branch is deprecated because it is so slow.  But lately, I found it is the inefficiency of the C++ regex library that leads to it.
 
